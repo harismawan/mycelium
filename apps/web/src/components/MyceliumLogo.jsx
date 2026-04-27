@@ -1,0 +1,69 @@
+/**
+ * Mycelium mushroom logo SVG component.
+ * @param {{ size?: number, className?: string }} props
+ */
+export default function MyceliumLogo({ size = 24, className }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 100 100"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      className={className}
+    >
+      {/* Mushroom cap */}
+      <path
+        d="M20 45 C20 20, 80 20, 80 45 L20 45Z"
+        fill="currentColor"
+        opacity="0.95"
+      />
+      {/* Cap dots */}
+      <circle cx="38" cy="32" r="2.5" fill="var(--color-bg, #181818)" opacity="0.5" />
+      <circle cx="52" cy="28" r="2" fill="var(--color-bg, #181818)" opacity="0.5" />
+      <circle cx="62" cy="35" r="2.5" fill="var(--color-bg, #181818)" opacity="0.5" />
+      <circle cx="45" cy="38" r="1.8" fill="var(--color-bg, #181818)" opacity="0.5" />
+
+      {/* Stem */}
+      <rect x="44" y="45" width="12" height="14" rx="1" fill="currentColor" opacity="0.7" />
+
+      {/* Mycelium roots */}
+      <g stroke="currentColor" strokeWidth="1.2" fill="none" opacity="0.6">
+        <line x1="50" y1="59" x2="50" y2="68" />
+        <line x1="50" y1="62" x2="30" y2="78" />
+        <line x1="50" y1="62" x2="70" y2="78" />
+        <line x1="50" y1="65" x2="22" y2="72" />
+        <line x1="50" y1="65" x2="78" y2="72" />
+        <line x1="50" y1="63" x2="36" y2="82" />
+        <line x1="50" y1="63" x2="64" y2="82" />
+        <line x1="50" y1="64" x2="42" y2="76" />
+        <line x1="50" y1="64" x2="58" y2="76" />
+        <line x1="50" y1="66" x2="26" y2="84" />
+        <line x1="50" y1="66" x2="74" y2="84" />
+      </g>
+
+      {/* Root nodes */}
+      <g fill="currentColor" opacity="0.7">
+        <circle cx="30" cy="78" r="2.5" />
+        <circle cx="70" cy="78" r="2.5" />
+        <circle cx="22" cy="72" r="2" />
+        <circle cx="78" cy="72" r="2" />
+        <circle cx="36" cy="82" r="2" />
+        <circle cx="64" cy="82" r="2" />
+        <circle cx="42" cy="76" r="1.5" />
+        <circle cx="58" cy="76" r="1.5" />
+        <circle cx="26" cy="84" r="2.5" />
+        <circle cx="74" cy="84" r="2.5" />
+        <circle cx="50" cy="68" r="2" />
+      </g>
+
+      {/* Root node outlines for hollow effect */}
+      <g stroke="currentColor" strokeWidth="1" fill="none" opacity="0.4">
+        <circle cx="22" cy="72" r="3.5" />
+        <circle cx="78" cy="72" r="3.5" />
+        <circle cx="42" cy="76" r="3" />
+        <circle cx="58" cy="76" r="3" />
+      </g>
+    </svg>
+  );
+}

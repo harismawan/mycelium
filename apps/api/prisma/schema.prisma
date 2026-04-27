@@ -1,0 +1,99 @@
+// Mycelium — Prisma Schema
+// Dual-audience knowledge base: human SPA + AI agent API
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum NoteStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+model User {
+  id          String   @id @default(cuid())
+  email       String   @unique
+  password    String
+  displayName String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  notes       Note[]
+  apiKeys     ApiKey[]
+
+  @@index([email])
+}
+
+model Note {
+  id          String     @id @default(cuid())
+  slug        String     @unique
+  title       String
+  content     String
+  frontmatter Json?
+  excerpt     String?
+  status      NoteStatus @default(DRAFT)
+  pinned      Boolean    @default(false)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  userId      String
+  user        User       @relation(fields: [userId], references: [id])
+  outLinks    Link[]     @relation("FromNote")
+  inLinks     Link[]     @relation("ToNote")
+  tags        Tag[]
+  revisions   Revision[]
+
+  @@index([slug])
+  @@index([status])
+  @@index([userId])
+}
+
+model Link {
+  id        String   @id @default(cuid())
+  fromId    String
+  toId      String?
+  toTitle   String?
+  relation  String?
+  createdAt DateTime @default(now())
+  from      Note     @relation("FromNote", fields: [fromId], references: [id], onDelete: Cascade)
+  to        Note?    @relation("ToNote", fields: [toId], references: [id], onDelete: SetNull)
+
+  @@index([fromId])
+  @@index([toId])
+}
+
+model Tag {
+  id    String @id @default(cuid())
+  name  String @unique
+  notes Note[]
+
+  @@index([name])
+}
+
+model Revision {
+  id        String   @id @default(cuid())
+  content   String
+  message   String?
+  createdAt DateTime @default(now())
+  noteId    String
+  note      Note     @relation(fields: [noteId], references: [id], onDelete: Cascade)
+
+  @@index([noteId])
+}
+
+model ApiKey {
+  id         String    @id @default(cuid())
+  name       String
+  keyHash    String    @unique
+  scopes     String[]
+  lastUsedAt DateTime?
+  createdAt  DateTime  @default(now())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([keyHash])
+}

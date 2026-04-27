@@ -1,0 +1,57 @@
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: mycelium
+      POSTGRES_PASSWORD: mycelium
+      POSTGRES_DB: mycelium
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mycelium"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://mycelium:mycelium@postgres:5432/mycelium?schema=public
+      JWT_SECRET: change-this-in-production
+      PORT: "3000"
+      NODE_ENV: production
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "80:80"
+
+  # Run migrations on startup
+  migrate:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    command: bunx prisma migrate deploy
+    environment:
+      DATABASE_URL: postgresql://mycelium:mycelium@postgres:5432/mycelium?schema=public
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+volumes:
+  pgdata:

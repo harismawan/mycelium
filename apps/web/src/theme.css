@@ -1,0 +1,53 @@
+/* Mycelium — Light & Dark Theme Variables (Tolaria-inspired) */
+
+:root {
+  --color-bg: #ffffff;
+  --color-bg-surface: #f8f9fa;
+  --color-bg-hover: #f0f1f3;
+  --color-bg-active: #e8eaed;
+  --color-text: #1a1a1a;
+  --color-text-secondary: #6b7280;
+  --color-text-muted: #9ca3af;
+  --color-border: #e0e0e0;
+  --color-primary: #2563eb;
+  --color-primary-hover: #1d4ed8;
+  --color-accent: #7c3aed;
+  --color-danger: #dc2626;
+  --color-success: #16a34a;
+  --color-code-bg: #f1f5f9;
+  --color-shadow: rgba(0, 0, 0, 0.08);
+  --color-badge-bg: rgba(37, 99, 235, 0.1);
+  --color-badge-text: #2563eb;
+  --sidebar-width: 180px;
+  --notelist-width: 300px;
+  --rightpane-width: 280px;
+}
+
+[data-theme="dark"] {
+  --color-bg: #181818;
+  --color-bg-surface: #1f1f1f;
+  --color-bg-hover: #2a2a2a;
+  --color-bg-active: #333333;
+  --color-text: #e2e8f0;
+  --color-text-secondary: #8b8b8b;
+  --color-text-muted: #5a5a5a;
+  --color-border: #2e2e2e;
+  --color-primary: #60a5fa;
+  --color-primary-hover: #93bbfd;
+  --color-accent: #a78bfa;
+  --color-danger: #f87171;
+  --color-success: #22c55e;
+  --color-code-bg: #1f1f1f;
+  --color-shadow: rgba(0, 0, 0, 0.5);
+  --color-badge-bg: rgba(96, 165, 250, 0.12);
+  --color-badge-text: #60a5fa;
+}
+
+/* Base resets using theme variables */
+body {
+  margin: 0;
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}

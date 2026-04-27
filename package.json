@@ -1,0 +1,10 @@
+{
+  "name": "mycelium",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/api",
+    "apps/web",
+    "packages/shared"
+  ]
+}

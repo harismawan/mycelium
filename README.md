@@ -1,6 +1,10 @@
-# Mycelium
+<p align="center">
+  <img src="assets/logo.svg" alt="Mycelium" width="400" />
+</p>
 
-A Markdown-first knowledge base serving two audiences: human users through a React SPA with a block editor, and AI agents through a REST API and MCP server. Content is stored as Markdown with wikilinks and backlinks treated as first-class relationships.
+<p align="center">
+  A Markdown-first knowledge base   serving two audiences: human users through a React SPA with a block editor, and AI agents through a REST API and MCP server. Content is stored as Markdown with wikilinks and backlinks treated as first-class relationships.
+</p>
 
 ## Architecture
 

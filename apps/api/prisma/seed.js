@@ -21,186 +21,284 @@ const DEMO_API_KEY_PLAINTEXT = 'myc_demo_agent_key_for_testing';
  */
 const SEED_NOTES = [
   {
-    title: 'Getting Started with Mycelium',
-    slug: 'getting-started-with-mycelium',
+    title: 'Welcome to Mycelium',
+    slug: 'welcome-to-mycelium',
     status: 'PUBLISHED',
-    tags: ['guide', 'onboarding'],
-    content: `Welcome to Mycelium, your second brain. This note will help you understand the basics.
+    tags: ['getting-started'],
+    content: `# Welcome to Mycelium
 
-Check out [[How Wikilinks Work]] to learn about linking notes together.
-Also see [[Markdown Tips]] for formatting guidance.`,
+Mycelium is a knowledge network built for humans and AI agents. Think of it as a living notebook where every note can link to every other note, forming a web of ideas you can explore, search, and grow over time.
+
+## What makes Mycelium different?
+
+- A block-based editor that feels natural to write in — see [[The Block Editor]]
+- Bidirectional links between notes using \`[[wikilinks]]\` — see [[Wikilinks and Backlinks]]
+- An interactive graph that visualizes your knowledge — see [[The Graph View]]
+- A REST API so AI agents can read and work with your notes — see [[Agent API]]
+
+## Getting oriented
+
+Start by exploring these notes. They cover everything from [[Tags and Organization]] to [[The Command Palette]] and [[Keyboard Shortcuts]]. Each one is a real Mycelium note, so feel free to edit, link, or delete them as you make the space your own.`,
   },
   {
-    title: 'How Wikilinks Work',
-    slug: 'how-wikilinks-work',
+    title: 'The Block Editor',
+    slug: 'the-block-editor',
     status: 'PUBLISHED',
-    tags: ['guide', 'linking'],
-    content: `Wikilinks let you connect notes using the \`[[Note Title]]\` syntax.
+    tags: ['getting-started', 'editor'],
+    content: `# The Block Editor
 
-For example, linking to [[Getting Started with Mycelium]] creates a bidirectional relationship.
-You can also link to [[Graph Visualization Guide]] to see how links appear visually.
-See [[Backlinks Explained]] for the reverse side of linking.`,
+Mycelium uses a block-based editor. Each paragraph, heading, list, or code block is its own block that you can move and rearrange.
+
+## Slash commands
+
+Type \`/\` at the start of a new line to open the slash menu. From there you can insert:
+
+- Headings (levels 1–3)
+- Bullet and numbered lists
+- Code blocks with syntax highlighting
+- Blockquotes
+- Images
+
+## Editing tips
+
+- Drag blocks by their handle to reorder content
+- Press **Cmd+S** (or Ctrl+S) to save your note
+- Switch to raw markdown anytime with [[Code View]]
+
+The editor stores everything as clean markdown under the hood, so your notes are always portable. For a full list of shortcuts, see [[Keyboard Shortcuts]].`,
   },
   {
-    title: 'Backlinks Explained',
-    slug: 'backlinks-explained',
+    title: 'Wikilinks and Backlinks',
+    slug: 'wikilinks-and-backlinks',
     status: 'PUBLISHED',
-    tags: ['guide', 'linking'],
-    content: `# Backlinks Explained
+    tags: ['getting-started', 'linking'],
+    content: `# Wikilinks and Backlinks
 
-Backlinks are the reverse of wikilinks. When [[How Wikilinks Work]] links to this note,
-this note automatically shows that as a backlink.
+Wikilinks are the connective tissue of Mycelium. They turn your notes from isolated pages into a connected knowledge network.
 
-Backlinks help you discover connections you might not have made explicitly.
-Related: [[Knowledge Graph Theory]].`,
+## Creating a wikilink
+
+Type \`[\` in the editor and an autocomplete menu will appear with your existing notes. Select one to insert a \`[[wikilink]]\`. You can also type the full syntax manually: \`[[Note Title]]\`.
+
+## Backlinks
+
+When note A links to note B, note B automatically shows a backlink to note A in the right panel. You never have to create backlinks yourself — Mycelium tracks them for you.
+
+## Why this matters
+
+Backlinks surface unexpected connections. You might link to a note today and discover months later that five other notes also reference it. That's the power of a networked notebook.
+
+To see how your links look as a whole, check out [[The Graph View]].`,
   },
   {
-    title: 'Markdown Tips',
-    slug: 'markdown-tips',
+    title: 'The Graph View',
+    slug: 'the-graph-view',
     status: 'PUBLISHED',
-    tags: ['guide', 'writing'],
-    content: `# Markdown Tips
+    tags: ['getting-started', 'visualization'],
+    content: `# The Graph View
 
-Mycelium stores everything as Markdown with YAML frontmatter.
+The graph view gives you a bird's-eye view of your entire knowledge network. Open it from the sidebar by clicking the graph icon.
 
-- Use headings for structure
-- Use lists for organization
-- Use code blocks for technical content
+## How it works
 
-See [[Getting Started with Mycelium]] for the basics and [[Daily Note Template]] for a practical example.`,
+- Each note is a **node** in the graph
+- Each [[Wikilinks and Backlinks]] connection is an **edge** between nodes
+- Nodes are colored by status: published, draft, or archived (see [[Note Statuses]])
+
+## Interacting with the graph
+
+- Click any node to navigate directly to that note
+- Zoom and pan to explore clusters of related ideas
+- Hover over a node to highlight its connections
+
+The graph is most useful once you have a handful of linked notes. As your network grows, you'll start to see clusters form around topics — that's your knowledge taking shape.`,
   },
   {
-    title: 'Daily Note Template',
-    slug: 'daily-note-template',
+    title: 'Tags and Organization',
+    slug: 'tags-and-organization',
+    status: 'PUBLISHED',
+    tags: ['getting-started', 'organization'],
+    content: `# Tags and Organization
+
+Tags give you a second way to organize notes alongside [[Wikilinks and Backlinks]]. While wikilinks capture relationships between specific ideas, tags group notes by broad topic.
+
+## Adding tags
+
+Open the **Properties** panel on the right side of the editor and add or remove tags from there. Tags are shared across all your notes, so reusing the same tag name groups notes together automatically.
+
+## Browsing by tag
+
+The sidebar has a tag tree that shows all your tags. Click any tag to filter the note list down to just the notes with that tag.
+
+## Tips
+
+- Use a small number of consistent tags rather than creating a new tag for every note
+- Combine tags with wikilinks for the best of both worlds
+- Tags like \`getting-started\` on these notes are a good example of topical grouping`,
+  },
+  {
+    title: 'Note Statuses',
+    slug: 'note-statuses',
+    status: 'PUBLISHED',
+    tags: ['getting-started', 'organization'],
+    content: `# Note Statuses
+
+Every note in Mycelium has one of three statuses:
+
+- **DRAFT** — A work in progress. Draft notes are visible only to you and won't appear in agent API bundles. See [[Keyboard Shortcuts]] for an example of a draft note.
+- **PUBLISHED** — Ready to share. Published notes are included in API responses and are the default status for new notes.
+- **ARCHIVED** — No longer active but preserved for reference. See [[Example: Project Notes]] for an archived note.
+
+## Changing status
+
+Open the **Properties** panel on the right side of the editor and select a new status from the dropdown.
+
+## Archive vs. delete
+
+Archiving keeps the note and all its links intact — you can always restore it later. Deleting a note is permanent and removes it from the graph entirely. When in doubt, archive.`,
+  },
+  {
+    title: 'The Command Palette',
+    slug: 'the-command-palette',
+    status: 'PUBLISHED',
+    tags: ['getting-started', 'productivity'],
+    content: `# The Command Palette
+
+Press **Cmd+K** (or **Ctrl+K** on Windows/Linux) to open the command palette. It's the fastest way to get around Mycelium.
+
+## What you can do
+
+- **Search notes** — Start typing a note title to jump to it instantly
+- **Navigate** — Go to the Graph view, Settings, or other pages
+- **Quick actions** — Create a new note without leaving the keyboard
+
+## Keyboard-first workflow
+
+The command palette is designed for people who prefer to keep their hands on the keyboard. Combined with [[Keyboard Shortcuts]], you can navigate, create, and edit notes without ever reaching for the mouse.
+
+If you're coming from tools like VS Code or Obsidian, this will feel familiar.`,
+  },
+  {
+    title: 'Revision History',
+    slug: 'revision-history',
+    status: 'PUBLISHED',
+    tags: ['getting-started', 'editor'],
+    content: `# Revision History
+
+Every time you save a note, Mycelium creates a revision. This means you can always look back at how a note evolved over time.
+
+## Viewing revisions
+
+Open the **Properties** panel and scroll to the revision history section. Each revision shows a timestamp and a summary. Click any revision to see a side-by-side diff comparing it to the current version.
+
+## Why it matters
+
+- Accidentally deleted a paragraph? Find it in a previous revision.
+- Want to see how an idea developed? Walk through the history.
+- Working with an AI agent via the [[Agent API]]? Revisions track every change, whether made by you or an agent.
+
+Revisions are automatic — there's nothing to configure. Just save your work with **Cmd+S** and Mycelium handles the rest.`,
+  },
+  {
+    title: 'Code View',
+    slug: 'code-view',
+    status: 'PUBLISHED',
+    tags: ['getting-started', 'editor'],
+    content: `# Code View
+
+Mycelium stores every note as plain markdown. The code view lets you see and edit that markdown directly.
+
+## Toggling code view
+
+Click the code icon (\`</>\`) in the editor toolbar to switch between the block editor and raw markdown. Your changes sync between both views.
+
+## When to use it
+
+- Fixing formatting issues that are tricky in the block editor
+- Pasting markdown from another tool
+- Inspecting how [[Wikilinks and Backlinks]] look in the raw source (\`[[Note Title]]\`)
+- Writing complex tables or nested lists
+
+## Good to know
+
+Code view shows exactly what gets stored. There's no hidden formatting or proprietary syntax — it's all standard markdown. This makes it easy to export your notes or work with them through the [[Agent API]].`,
+  },
+  {
+    title: 'Agent API',
+    slug: 'agent-api',
+    status: 'PUBLISHED',
+    tags: ['getting-started', 'api'],
+    content: `# Agent API
+
+Mycelium includes a REST API designed for AI agents. This lets external tools and LLMs read your notes, discover connections, and work with your knowledge base programmatically.
+
+## Setting up
+
+1. Go to **Settings** (from the sidebar or [[The Command Palette]])
+2. Create a new API key and copy it somewhere safe
+3. Use the key in the \`Authorization\` header as a Bearer token
+
+## Key endpoints
+
+- **Manifest** — Returns metadata about your knowledge base (note count, tags, etc.)
+- **Bundle** — Streams all published notes as NDJSON, ideal for feeding into an LLM context
+- **Notes** — CRUD operations on individual notes
+
+## How agents use it
+
+An AI agent can fetch your published notes via the bundle endpoint, process them, and even create new notes or update existing ones. Combined with [[Wikilinks and Backlinks]], agents can navigate your knowledge graph just like you do.
+
+For more on how Mycelium works, head back to [[Welcome to Mycelium]].`,
+  },
+  {
+    title: 'Keyboard Shortcuts',
+    slug: 'keyboard-shortcuts',
     status: 'DRAFT',
-    tags: ['template', 'productivity'],
-    content: `# Daily Note Template
+    tags: ['getting-started', 'productivity'],
+    content: `# Keyboard Shortcuts
 
-Use this template for your daily notes:
+A quick reference for the most useful shortcuts in Mycelium. This note is a **draft** — notice how it looks different in the sidebar and [[The Graph View]].
 
-## Tasks
-- [ ] Review [[Project Alpha Notes]]
-- [ ] Update [[Research on Neural Networks]]
+## Editor
 
-## Reflections
-Write your thoughts here. Link to relevant notes using wikilinks.`,
+| Shortcut | Action |
+|----------|--------|
+| \`Cmd+S\` | Save the current note |
+| \`/\` | Open the slash command menu |
+| \`[\` | Start a wikilink and open autocomplete |
+
+## Navigation
+
+| Shortcut | Action |
+|----------|--------|
+| \`Cmd+K\` | Open [[The Command Palette]] |
+
+## Tips
+
+- On Windows and Linux, replace \`Cmd\` with \`Ctrl\`
+- The slash menu and wikilink autocomplete work inside [[The Block Editor]]
+- Save often — every save creates a snapshot in [[Revision History]]`,
   },
   {
-    title: 'Project Alpha Notes',
-    slug: 'project-alpha-notes',
-    status: 'PUBLISHED',
-    tags: ['project', 'work'],
-    content: `# Project Alpha Notes
-
-Key decisions and progress for Project Alpha.
-
-## Architecture
-We decided to use a microservices approach. See [[API Design Patterns]] for reference.
-
-## Timeline
-- Phase 1: Research — see [[Research on Neural Networks]]
-- Phase 2: Implementation
-- Phase 3: Testing`,
-  },
-  {
-    title: 'Research on Neural Networks',
-    slug: 'research-on-neural-networks',
-    status: 'PUBLISHED',
-    tags: ['research', 'ai'],
-    content: `# Research on Neural Networks
-
-Notes on neural network architectures and training approaches.
-
-## Key Papers
-- Attention Is All You Need
-- BERT: Pre-training of Deep Bidirectional Transformers
-
-## Connections
-This research feeds into [[Project Alpha Notes]] and relates to [[Knowledge Graph Theory]].`,
-  },
-  {
-    title: 'Knowledge Graph Theory',
-    slug: 'knowledge-graph-theory',
-    status: 'PUBLISHED',
-    tags: ['research', 'linking'],
-    content: `# Knowledge Graph Theory
-
-Knowledge graphs represent information as nodes and edges, similar to how Mycelium works.
-
-## Core Concepts
-- Nodes represent entities (notes in our case)
-- Edges represent relationships (wikilinks)
-- Traversal enables discovery
-
-See [[Graph Visualization Guide]] for how Mycelium renders these.
-Also related: [[Backlinks Explained]] and [[How Wikilinks Work]].`,
-  },
-  {
-    title: 'Graph Visualization Guide',
-    slug: 'graph-visualization-guide',
-    status: 'PUBLISHED',
-    tags: ['guide', 'visualization'],
-    content: `# Graph Visualization Guide
-
-Mycelium provides an interactive graph view of your notes and their connections.
-
-## Features
-- Force-directed layout
-- Color-coded by status
-- Click to navigate
-- Zoom and pan
-
-The graph is built from the links described in [[How Wikilinks Work]] and grounded in [[Knowledge Graph Theory]].`,
-  },
-  {
-    title: 'API Design Patterns',
-    slug: 'api-design-patterns',
-    status: 'DRAFT',
-    tags: ['engineering', 'reference'],
-    content: `# API Design Patterns
-
-Common patterns used in [[Project Alpha Notes]] and other projects.
-
-## REST Conventions
-- Use nouns for resources
-- Use HTTP verbs for actions
-- Cursor-based pagination for lists
-
-## Authentication
-- JWT for human users
-- API keys for agents
-
-See [[Getting Started with Mycelium]] for how Mycelium implements these patterns.`,
-  },
-  {
-    title: 'Archived Meeting Notes',
-    slug: 'archived-meeting-notes',
+    title: 'Example: Project Notes',
+    slug: 'example-project-notes',
     status: 'ARCHIVED',
-    tags: ['meetings', 'work'],
-    content: `# Archived Meeting Notes
+    tags: ['example'],
+    content: `# Example: Project Notes
 
-These meeting notes from Q1 are no longer active.
+This is a sample archived note. It demonstrates what happens when you archive something in Mycelium.
 
-## Discussed
-- [[Project Alpha Notes]] timeline review
-- [[Research on Neural Networks]] progress update
+## What you'll notice
 
-This note has been archived but links are preserved.`,
-  },
-  {
-    title: 'Personal Reading List',
-    slug: 'personal-reading-list',
-    status: 'DRAFT',
-    tags: ['personal', 'reading'],
-    content: `# Personal Reading List
+- This note still appears in search and in [[The Graph View]], but it's visually marked as archived
+- All wikilinks to and from this note still work
+- You can restore it to draft or published status anytime from the Properties panel
 
-Books and articles to read:
+## Why archive?
 
-1. Thinking in Systems — relates to [[Knowledge Graph Theory]]
-2. The Art of Doing Science — connects to [[Research on Neural Networks]]
-3. Design Patterns — see [[API Design Patterns]]
+Archiving is useful for notes that are no longer active but might be valuable later — old project plans, completed research, or meeting notes you want to keep around. See [[Note Statuses]] for more on how statuses work.
 
-Use [[Daily Note Template]] to track reading progress.`,
+If you're just getting started, head over to [[Welcome to Mycelium]] for the full tour.`,
   },
 ];
 

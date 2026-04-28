@@ -5,6 +5,7 @@
   "workspaces": [
     "apps/api",
     "apps/web",
+    "apps/mcp",
     "packages/shared"
   ]
 }

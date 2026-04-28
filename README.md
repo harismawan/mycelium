@@ -15,7 +15,7 @@ mycelium/
 │   └── shared/       # Markdown pipeline (remark/rehype), slug helpers, constants
 ├── docker-compose.yml          # Dev: PostgreSQL only
 ├── docker-compose.prod.yml     # Production: full stack
-├── AGENT.md                    # Agent API documentation
+├── AGENTS.md                   # Agent API documentation
 └── package.json                # Bun workspace root
 ```
 
@@ -121,7 +121,7 @@ docker compose -f docker-compose.prod.yml exec api bunx prisma db seed
 
 ## Agent API
 
-Dedicated endpoints for AI agents under `/api/v1/agent`. See [AGENT.md](./AGENT.md) for full documentation:
+Dedicated endpoints for AI agents under `/api/v1/agent`. See [AGENTS.md](./AGENTS.md) for full documentation:
 
 - `GET /api/v1/agent/manifest` — API discovery
 - `GET /api/v1/agent/bundle` — NDJSON stream of all published notes

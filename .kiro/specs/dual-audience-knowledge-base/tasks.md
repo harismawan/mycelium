@@ -325,7 +325,7 @@ Incremental build of a Bun monorepo knowledge base with Elysia API, React SPA, a
 - [x] 16. Checkpoint — Full SPA
   - Ensure all tests pass, ask the user if questions arise.
 
-- [-] 17. Seed script, AGENT.md, README, and final wiring
+- [-] 17. Seed script, AGENTS.md, README, and final wiring
   - [x] 17.1 Create seed script in `apps/api/prisma/seed.js`
     - Create demo user with known email/password
     - Create at least 10 interlinked notes with varied statuses, tags, and wikilinks
@@ -333,7 +333,7 @@ Incremental build of a Bun monorepo knowledge base with Elysia API, React SPA, a
     - Make script idempotent
     - _Requirements: 22.1, 22.2, 22.3, 22.4_
 
-  - [x] 17.2 Create AGENT.md documentation
+  - [x] 17.2 Create AGENTS.md documentation
     - Document all agent-specific endpoints (`/agent/manifest`, `/agent/bundle`, `/agent/notes`)
     - Document API key authentication, request/response schemas, usage examples
     - _Requirements: 24.1_

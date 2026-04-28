@@ -1,0 +1,27 @@
+{
+  "name": "mycelium-knowledge-base",
+  "version": "0.1.0",
+  "description": "Persistent knowledge base for AI agents. Search, read, create, and link notes.",
+  "category": "knowledge",
+  "author": "Mycelium",
+  "license": "MIT",
+  "mcp": {
+    "command": "bun",
+    "args": ["run", "apps/mcp/src/index.js"],
+    "env": {
+      "MYCELIUM_API_KEY": { "required": true, "description": "API key with agent:read and notes:write scopes" },
+      "DATABASE_URL": { "required": true, "description": "PostgreSQL connection string" }
+    },
+    "transport": "stdio"
+  },
+  "clawHub": {
+    "compatibleVersions": ">=2026.4.0",
+    "installInstructions": "See AGENTS.md for setup guide"
+  },
+  "tools": [
+    "search_notes", "read_note", "create_note", "update_note", "list_notes",
+    "list_tags", "get_backlinks", "get_outgoing_links", "get_graph",
+    "get_context", "save_memory",
+    "set_session_context", "get_session_context", "list_session_context"
+  ]
+}

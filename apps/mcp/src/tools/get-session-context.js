@@ -1,12 +1,12 @@
 import { z } from 'zod';
 import { checkScopes } from '../auth.js';
 import { log } from '../logger.js';
-import { getSessionStore } from '../session.js';
+import { getSessionValue } from '../session.js';
 
 /**
  * Register the `get_session_context` tool on the MCP server.
  *
- * Retrieves a value from the ephemeral session store by key. Returns null
+ * Retrieves a value from the Redis-backed session store by key. Returns null
  * if the key does not exist.
  *
  * @param {import('@modelcontextprotocol/sdk/server/mcp.js').McpServer} server
@@ -25,8 +25,7 @@ export function register(server, auth) {
 
       const start = performance.now();
       try {
-        const store = getSessionStore(auth.userId);
-        const value = store.get(key) ?? null;
+        const value = await getSessionValue(auth.userId, key);
 
         log('info', 'tool.call', { tool: 'get_session_context', durationMs: performance.now() - start, success: true });
         return { content: [{ type: 'text', text: JSON.stringify({ value }) }] };

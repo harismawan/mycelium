@@ -1,12 +1,12 @@
 import { z } from 'zod';
 import { checkScopes } from '../auth.js';
 import { log } from '../logger.js';
-import { getSessionStore, validateSessionLimits } from '../session.js';
+import { setSessionValue, validateSessionLimits } from '../session.js';
 
 /**
  * Register the `set_session_context` tool on the MCP server.
  *
- * Stores a key-value pair in the ephemeral session store scoped to the
+ * Stores a key-value pair in the Redis-backed session store scoped to the
  * current connection. Enforces max 100 keys and 10KB per value.
  *
  * @param {import('@modelcontextprotocol/sdk/server/mcp.js').McpServer} server
@@ -26,8 +26,7 @@ export function register(server, auth) {
 
       const start = performance.now();
       try {
-        const store = getSessionStore(auth.userId);
-        const limitError = validateSessionLimits(store, key, value);
+        const limitError = await setSessionValue(auth.userId, key, value);
         if (limitError) {
           log('warn', 'tool.call', { tool: 'set_session_context', durationMs: performance.now() - start, success: false, error: limitError });
           return {
@@ -35,8 +34,6 @@ export function register(server, auth) {
             isError: true,
           };
         }
-
-        store.set(key, value);
 
         log('info', 'tool.call', { tool: 'set_session_context', durationMs: performance.now() - start, success: true });
         return { content: [{ type: 'text', text: JSON.stringify({ success: true }) }] };

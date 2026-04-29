@@ -5,6 +5,7 @@ import { resolveAuth } from './auth.js';
 import { createServer } from './server.js';
 import { log } from './logger.js';
 import { destroySession } from './session.js';
+import { connectRedis } from '@mycelium/shared/redis';
 
 /**
  * Determine the transport mode from CLI args or environment variable.
@@ -48,8 +49,8 @@ async function startStdio() {
   await server.connect(transport);
   log('info', 'MCP server started', { transport: 'stdio' });
 
-  const cleanup = () => {
-    destroySession(auth.userId);
+  const cleanup = async () => {
+    await destroySession(auth.userId);
     log('info', 'Session destroyed', { userId: auth.userId, reason: 'stdio close' });
   };
 
@@ -89,8 +90,8 @@ async function startHttp() {
         const server = createServer(auth);
         const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined });
 
-        transport.onclose = () => {
-          destroySession(auth.userId);
+        transport.onclose = async () => {
+          await destroySession(auth.userId);
           log('info', 'Session destroyed', { userId: auth.userId, reason: 'http close' });
         };
 
@@ -117,6 +118,14 @@ async function main() {
   log('info', 'Starting MCP server', { transport });
 
   await ensureDatabase();
+
+  // Connect to Redis for session context storage
+  try {
+    await connectRedis();
+  } catch (err) {
+    log('error', 'Redis connection failed', { error: err.message });
+    process.exit(1);
+  }
 
   if (transport === 'stdio') {
     await startStdio();

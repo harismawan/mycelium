@@ -15,14 +15,29 @@ services:
       timeout: 3s
       retries: 5
 
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   api:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
     restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
     environment:
       DATABASE_URL: ${DATABASE_URL}
       JWT_SECRET: ${JWT_SECRET}
+      REDIS_URL: redis://redis:6379
       PORT: "3000"
       NODE_ENV: production
     ports:
@@ -43,8 +58,12 @@ services:
       context: .
       dockerfile: apps/mcp/Dockerfile
     restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
     environment:
       DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: redis://redis:6379
       MCP_TRANSPORT: http
       MCP_PORT: "3001"
       NODE_ENV: production
@@ -63,3 +82,4 @@ services:
 
 volumes:
   pgdata:
+  redisdata:

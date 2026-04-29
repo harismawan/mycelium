@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import styled from 'styled-components';
 import { Search, Plus, Archive, Trash2, RotateCcw } from 'lucide-react';
@@ -70,12 +70,23 @@ const NoteCard = styled.div`
   text-align: left;
   padding: 12px 14px;
   border-bottom: 1px solid var(--color-border);
-  background: ${(props) => (props.$active ? 'var(--color-bg-active)' : 'transparent')};
+  background: ${(props) =>
+    props.$selected
+      ? 'color-mix(in srgb, var(--color-primary) 12%, var(--color-bg))'
+      : props.$active
+        ? 'var(--color-bg-active)'
+        : 'transparent'};
   cursor: pointer;
   transition: background-color 0.1s ease;
+  user-select: none;
 
   &:hover {
-    background: ${(props) => (props.$active ? 'var(--color-bg-active)' : 'var(--color-bg-hover)')};
+    background: ${(props) =>
+      props.$selected
+        ? 'color-mix(in srgb, var(--color-primary) 16%, var(--color-bg))'
+        : props.$active
+          ? 'var(--color-bg-active)'
+          : 'var(--color-bg-hover)'};
   }
 `;
 
@@ -148,15 +159,6 @@ const NoteMeta = styled.div`
   color: var(--color-text-muted);
 `;
 
-const Checkbox = styled.input.attrs({ type: 'checkbox' })`
-  width: 14px;
-  height: 14px;
-  margin: 0;
-  cursor: pointer;
-  accent-color: var(--color-primary);
-  flex-shrink: 0;
-`;
-
 const BulkBar = styled.div`
   display: flex;
   align-items: center;
@@ -182,12 +184,6 @@ const BulkBtn = styled.button`
   &:hover {
     background: var(--color-bg-hover);
   }
-`;
-
-const CardRow = styled.div`
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
 `;
 
 /**
@@ -222,8 +218,8 @@ function formatCreated(dateStr) {
 
 /**
  * Note list panel (Column 2) showing a scrollable list of note cards.
- * Header with title, search toggle, and new note button.
- * Clicking a card navigates to /notes/:slug.
+ * Click navigates to note. Cmd/Ctrl+Click toggles selection.
+ * Shift+Click selects a range from the last selected item.
  */
 export default function NoteListPanel() {
   const navigate = useNavigate();
@@ -239,6 +235,7 @@ export default function NoteListPanel() {
   const [titleDraft, setTitleDraft] = useState('');
   const [selectedSlugs, setSelectedSlugs] = useState(new Set());
   const [bulkAction, setBulkAction] = useState(null);
+  const lastClickedIndex = useRef(null);
 
   const handleArchive = async (slug, title) => {
     setArchiveTarget({ slug, title });
@@ -254,7 +251,6 @@ export default function NoteListPanel() {
       qc.invalidateQueries({ queryKey: tagKeys.all });
       if (selectedSlug === slug) {
         useNotesStore.getState().selectNote(null);
-        // Navigate to dashboard only if not in a filtered view
         if (!statusFilter && !tagFilter) navigate('/');
       }
     } catch { /* ignore */ }
@@ -308,14 +304,47 @@ export default function NoteListPanel() {
     if (e.key === 'Escape') setEditingSlug(null);
   };
 
-  const toggleSelect = (slug, e) => {
-    e.stopPropagation();
-    setSelectedSlugs((prev) => {
-      const next = new Set(prev);
-      if (next.has(slug)) next.delete(slug);
-      else next.add(slug);
-      return next;
-    });
+  /**
+   * Handle card click with multi-select support:
+   * - Cmd/Ctrl+Click: toggle individual selection
+   * - Shift+Click: select range from last clicked to current
+   * - Plain click: navigate to note (clears selection)
+   */
+  const handleCardClick = (e, note, index) => {
+    const isMeta = e.metaKey || e.ctrlKey;
+    const isShift = e.shiftKey;
+
+    if (isMeta) {
+      // Toggle individual selection
+      setSelectedSlugs((prev) => {
+        const next = new Set(prev);
+        if (next.has(note.slug)) next.delete(note.slug);
+        else next.add(note.slug);
+        return next;
+      });
+      lastClickedIndex.current = index;
+      return;
+    }
+
+    if (isShift && lastClickedIndex.current !== null) {
+      // Range selection
+      const start = Math.min(lastClickedIndex.current, index);
+      const end = Math.max(lastClickedIndex.current, index);
+      setSelectedSlugs((prev) => {
+        const next = new Set(prev);
+        for (let i = start; i <= end; i++) {
+          if (notes[i]) next.add(notes[i].slug);
+        }
+        return next;
+      });
+      return;
+    }
+
+    // Plain click — navigate (clear selection if any)
+    if (selectedSlugs.size > 0) {
+      setSelectedSlugs(new Set());
+    }
+    navigate(`/notes/${note.slug}`);
   };
 
   const confirmBulkAction = async () => {
@@ -433,19 +462,13 @@ export default function NoteListPanel() {
         )}
 
         {!isLoading &&
-          notes.map((note) => (
+          notes.map((note, index) => (
             <NoteCard
               key={note.id ?? note.slug}
               $active={selectedSlug === note.slug}
-              onClick={() => navigate(`/notes/${note.slug}`)}
+              $selected={selectedSlugs.has(note.slug)}
+              onClick={(e) => handleCardClick(e, note, index)}
             >
-              <CardRow>
-                <Checkbox
-                  checked={selectedSlugs.has(note.slug)}
-                  onChange={(e) => toggleSelect(note.slug, e)}
-                  aria-label={`Select ${note.title}`}
-                />
-                <div style={{ flex: 1, minWidth: 0 }}>
               {note.status === 'ARCHIVED' && (
                 <HoverBtn
                   $right="36px"
@@ -491,8 +514,6 @@ export default function NoteListPanel() {
                 <span>{relativeTime(note.updatedAt)}</span>
                 <span>{formatCreated(note.createdAt)}</span>
               </NoteMeta>
-                </div>
-              </CardRow>
             </NoteCard>
           ))}
       </NoteList>

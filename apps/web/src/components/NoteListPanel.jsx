@@ -326,10 +326,11 @@ export default function NoteListPanel() {
       return;
     }
 
-    if (isShift && lastClickedIndex.current !== null) {
-      // Range selection
-      const start = Math.min(lastClickedIndex.current, index);
-      const end = Math.max(lastClickedIndex.current, index);
+    if (isShift) {
+      // Range selection — use index 0 as anchor if no prior click
+      const anchor = lastClickedIndex.current ?? 0;
+      const start = Math.min(anchor, index);
+      const end = Math.max(anchor, index);
       setSelectedSlugs((prev) => {
         const next = new Set(prev);
         for (let i = start; i <= end; i++) {
@@ -337,6 +338,7 @@ export default function NoteListPanel() {
         }
         return next;
       });
+      lastClickedIndex.current = index;
       return;
     }
 

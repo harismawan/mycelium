@@ -6,6 +6,10 @@
   A Markdown-first knowledge base   serving two audiences: human users through a React SPA with a block editor, and AI agents through a REST API and MCP server. Content is stored as Markdown with wikilinks and backlinks treated as first-class relationships.
 </p>
 
+<p align="center">
+  <img src="assets/screenshot.png" alt="Mycelium Screenshot" width="800" />
+</p>
+
 ## Architecture
 
 Mycelium is a Bun monorepo with four workspaces:

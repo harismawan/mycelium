@@ -116,6 +116,19 @@ const NoteTitle = styled.div`
   white-space: nowrap;
 `;
 
+const NoteTitleInput = styled.input`
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text);
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-primary);
+  border-radius: 4px;
+  outline: none;
+  padding: 2px 6px;
+  margin-bottom: 4px;
+  width: 100%;
+`;
+
 const NoteExcerpt = styled.div`
   font-size: 12px;
   color: var(--color-text-secondary);
@@ -133,6 +146,48 @@ const NoteMeta = styled.div`
   justify-content: space-between;
   font-size: 11px;
   color: var(--color-text-muted);
+`;
+
+const Checkbox = styled.input.attrs({ type: 'checkbox' })`
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  cursor: pointer;
+  accent-color: var(--color-primary);
+  flex-shrink: 0;
+`;
+
+const BulkBar = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--color-border);
+  background: color-mix(in srgb, var(--color-primary) 8%, var(--color-bg));
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+`;
+
+const BulkBtn = styled.button`
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text);
+  cursor: pointer;
+  transition: background-color 0.1s ease;
+  &:hover {
+    background: var(--color-bg-hover);
+  }
+`;
+
+const CardRow = styled.div`
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
 `;
 
 /**
@@ -180,6 +235,10 @@ export default function NoteListPanel() {
   const qc = useQueryClient();
   const [archiveTarget, setArchiveTarget] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [editingSlug, setEditingSlug] = useState(null);
+  const [titleDraft, setTitleDraft] = useState('');
+  const [selectedSlugs, setSelectedSlugs] = useState(new Set());
+  const [bulkAction, setBulkAction] = useState(null);
 
   const handleArchive = async (slug, title) => {
     setArchiveTarget({ slug, title });
@@ -225,6 +284,53 @@ export default function NoteListPanel() {
       await apiPatch(`/notes/${slug}`, { status: 'DRAFT' });
       qc.invalidateQueries({ queryKey: ['notes'] });
       qc.invalidateQueries({ queryKey: tagKeys.all });
+    } catch { /* ignore */ }
+  };
+
+  const handleTitleDoubleClick = (e, slug, title) => {
+    e.stopPropagation();
+    setEditingSlug(slug);
+    setTitleDraft(title);
+  };
+
+  const handleTitleSave = async (slug) => {
+    const trimmed = titleDraft.trim();
+    setEditingSlug(null);
+    if (!trimmed || trimmed === slug) return;
+    try {
+      await apiPatch(`/notes/${slug}`, { title: trimmed });
+      qc.invalidateQueries({ queryKey: ['notes'] });
+    } catch { /* ignore */ }
+  };
+
+  const handleTitleKeyDown = (e, slug) => {
+    if (e.key === 'Enter') handleTitleSave(slug);
+    if (e.key === 'Escape') setEditingSlug(null);
+  };
+
+  const toggleSelect = (slug, e) => {
+    e.stopPropagation();
+    setSelectedSlugs((prev) => {
+      const next = new Set(prev);
+      if (next.has(slug)) next.delete(slug);
+      else next.add(slug);
+      return next;
+    });
+  };
+
+  const confirmBulkAction = async () => {
+    if (!bulkAction || selectedSlugs.size === 0) return;
+    const slugs = [...selectedSlugs];
+    setBulkAction(null);
+    try {
+      if (bulkAction === 'archive') {
+        await Promise.all(slugs.map((s) => apiDelete(`/notes/${s}`)));
+      } else if (bulkAction === 'delete') {
+        await Promise.all(slugs.map((s) => apiDelete(`/notes/${s}/permanent`)));
+      }
+      qc.invalidateQueries({ queryKey: ['notes'] });
+      qc.invalidateQueries({ queryKey: tagKeys.all });
+      setSelectedSlugs(new Set());
     } catch { /* ignore */ }
   };
 
@@ -306,6 +412,19 @@ export default function NoteListPanel() {
         </SearchRow>
       )}
 
+      {selectedSlugs.size > 0 && (
+        <BulkBar>
+          <span>{selectedSlugs.size} selected</span>
+          {statusFilter !== 'ARCHIVED' && (
+            <BulkBtn onClick={() => setBulkAction('archive')}>Archive</BulkBtn>
+          )}
+          {statusFilter === 'ARCHIVED' && (
+            <BulkBtn onClick={() => setBulkAction('delete')}>Delete</BulkBtn>
+          )}
+          <BulkBtn onClick={() => setSelectedSlugs(new Set())}>Clear</BulkBtn>
+        </BulkBar>
+      )}
+
       <NoteList>
         {isLoading && <EmptyState>Loading…</EmptyState>}
 
@@ -320,6 +439,13 @@ export default function NoteListPanel() {
               $active={selectedSlug === note.slug}
               onClick={() => navigate(`/notes/${note.slug}`)}
             >
+              <CardRow>
+                <Checkbox
+                  checked={selectedSlugs.has(note.slug)}
+                  onChange={(e) => toggleSelect(note.slug, e)}
+                  aria-label={`Select ${note.title}`}
+                />
+                <div style={{ flex: 1, minWidth: 0 }}>
               {note.status === 'ARCHIVED' && (
                 <HoverBtn
                   $right="36px"
@@ -346,12 +472,27 @@ export default function NoteListPanel() {
               >
                 {note.status === 'ARCHIVED' ? <Trash2 size={12} /> : <Archive size={12} />}
               </HoverBtn>
-              <NoteTitle>{note.title}</NoteTitle>
+              {editingSlug === note.slug ? (
+                <NoteTitleInput
+                  value={titleDraft}
+                  onChange={(e) => setTitleDraft(e.target.value)}
+                  onBlur={() => handleTitleSave(note.slug)}
+                  onKeyDown={(e) => handleTitleKeyDown(e, note.slug)}
+                  onClick={(e) => e.stopPropagation()}
+                  autoFocus
+                />
+              ) : (
+                <NoteTitle onDoubleClick={(e) => handleTitleDoubleClick(e, note.slug, note.title)}>
+                  {note.title}
+                </NoteTitle>
+              )}
               {note.excerpt && <NoteExcerpt>{note.excerpt}</NoteExcerpt>}
               <NoteMeta>
                 <span>{relativeTime(note.updatedAt)}</span>
                 <span>{formatCreated(note.createdAt)}</span>
               </NoteMeta>
+                </div>
+              </CardRow>
             </NoteCard>
           ))}
       </NoteList>
@@ -373,6 +514,16 @@ export default function NoteListPanel() {
           confirmLabel="Delete"
           onConfirm={confirmDelete}
           onCancel={() => setDeleteTarget(null)}
+        />
+      )}
+
+      {bulkAction && (
+        <ConfirmDialog
+          title={bulkAction === 'archive' ? 'Archive selected notes' : 'Delete selected notes'}
+          message={`This will ${bulkAction === 'archive' ? 'archive' : 'permanently delete'} ${selectedSlugs.size} note${selectedSlugs.size > 1 ? 's' : ''}. ${bulkAction === 'delete' ? 'This cannot be undone.' : ''}`}
+          confirmLabel={bulkAction === 'archive' ? 'Archive All' : 'Delete All'}
+          onConfirm={confirmBulkAction}
+          onCancel={() => setBulkAction(null)}
         />
       )}
     </Panel>

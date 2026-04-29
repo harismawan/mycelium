@@ -47,6 +47,34 @@ const SlugText = styled.span`
   white-space: nowrap;
 `;
 
+const TitleInput = styled.input`
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--color-primary);
+  outline: none;
+  padding: 2px 4px;
+  min-width: 120px;
+  max-width: 300px;
+`;
+
+const TitleDisplay = styled.span`
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  transition: border-color 0.15s ease;
+
+  &:hover {
+    border-color: var(--color-border);
+  }
+`;
+
 const Spacer = styled.div`
   flex: 1;
 `;
@@ -104,6 +132,8 @@ export default function EditorView() {
   const defaultView = useUIStore((s) => s.defaultView);
 
   const [codeView, setCodeView] = useState(defaultView === 'code');
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState('');
 
   const { data: noteData, isLoading, error } = useNote(slug);
   const updateNote = useUpdateNote(slug);
@@ -129,6 +159,25 @@ export default function EditorView() {
     );
   }, [content, noteData, updateNote, resetDirty]);
 
+  const handleTitleDoubleClick = () => {
+    setTitleDraft(noteData?.title ?? '');
+    setEditingTitle(true);
+  };
+
+  const handleTitleSave = () => {
+    const trimmed = titleDraft.trim();
+    if (trimmed && trimmed !== noteData?.title) {
+      const tags = noteData?.tags?.map((t) => t.name ?? t) ?? [];
+      updateNote.mutate({ title: trimmed, tags });
+    }
+    setEditingTitle(false);
+  };
+
+  const handleTitleKeyDown = (e) => {
+    if (e.key === 'Enter') handleTitleSave();
+    if (e.key === 'Escape') setEditingTitle(false);
+  };
+
   if (isLoading) return <LoadingState>Loading note…</LoadingState>;
   if (error) return <ErrorState>Failed to load note: {error.message}</ErrorState>;
 
@@ -139,7 +188,19 @@ export default function EditorView() {
     <Container>
       <TopBar>
         <NoteLabel>Note</NoteLabel>
-        <SlugText>{slug}</SlugText>
+        {editingTitle ? (
+          <TitleInput
+            value={titleDraft}
+            onChange={(e) => setTitleDraft(e.target.value)}
+            onBlur={handleTitleSave}
+            onKeyDown={handleTitleKeyDown}
+            autoFocus
+          />
+        ) : (
+          <TitleDisplay onDoubleClick={handleTitleDoubleClick} title="Double-click to edit title">
+            {noteData?.title ?? slug}
+          </TitleDisplay>
+        )}
         {isDirty && <DirtyDot title="Unsaved changes" />}
         <Spacer />
         <ToolbarButton

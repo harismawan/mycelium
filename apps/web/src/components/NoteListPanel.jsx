@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import styled from 'styled-components';
 import { Search, Plus, Archive, Trash2, RotateCcw } from 'lucide-react';
-import { useNotes, useCreateNote } from '../api/hooks.js';
+import { useNotes, useCreateNote, tagKeys } from '../api/hooks.js';
 import { apiDelete, apiPatch } from '../api/client.js';
 import { useQueryClient } from '@tanstack/react-query';
 import ConfirmDialog from './ConfirmDialog.jsx';
@@ -192,6 +192,7 @@ export default function NoteListPanel() {
     try {
       await apiDelete(`/notes/${slug}`);
       qc.invalidateQueries({ queryKey: ['notes'] });
+      qc.invalidateQueries({ queryKey: tagKeys.all });
       if (selectedSlug === slug) {
         useNotesStore.getState().selectNote(null);
         // Navigate to dashboard only if not in a filtered view
@@ -211,6 +212,7 @@ export default function NoteListPanel() {
     try {
       await apiDelete(`/notes/${slug}/permanent`);
       qc.invalidateQueries({ queryKey: ['notes'] });
+      qc.invalidateQueries({ queryKey: tagKeys.all });
       if (selectedSlug === slug) {
         useNotesStore.getState().selectNote(null);
         if (!statusFilter && !tagFilter) navigate('/');
@@ -222,6 +224,7 @@ export default function NoteListPanel() {
     try {
       await apiPatch(`/notes/${slug}`, { status: 'DRAFT' });
       qc.invalidateQueries({ queryKey: ['notes'] });
+      qc.invalidateQueries({ queryKey: tagKeys.all });
     } catch { /* ignore */ }
   };
 

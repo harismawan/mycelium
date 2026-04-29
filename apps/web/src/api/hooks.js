@@ -254,6 +254,7 @@ export function useRevertNote(slug) {
       qc.invalidateQueries({ queryKey: noteKeys.md(slug) });
       qc.invalidateQueries({ queryKey: revKeys.list(slug) });
       qc.invalidateQueries({ queryKey: activityKeys.all });
+      qc.invalidateQueries({ queryKey: tagKeys.all });
     },
   });
 }

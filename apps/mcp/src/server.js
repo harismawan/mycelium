@@ -20,7 +20,7 @@ const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url),
 /**
  * Create and configure an McpServer instance with all tools registered.
  *
- * @param {{ userId: string, scopes: string[] }} authContext
+ * @param {{ userId: string, scopes: string[], apiKeyId: string, apiKeyName: string }} authContext
  * @returns {import('@modelcontextprotocol/sdk/server/mcp.js').McpServer}
  */
 export function createServer(authContext) {

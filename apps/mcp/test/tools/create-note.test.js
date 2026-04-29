@@ -43,7 +43,7 @@ function createMockServer() {
 
 describe('create_note', () => {
   let handler;
-  const auth = { userId: 'u1', scopes: ['notes:write'] };
+  const auth = { userId: 'u1', scopes: ['notes:write'], apiKeyId: 'ak1', apiKeyName: 'test-key' };
 
   beforeEach(() => {
     mockPrisma.note.findMany.mockReset();

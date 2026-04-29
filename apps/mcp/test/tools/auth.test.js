@@ -31,6 +31,7 @@ describe('resolveAuth', () => {
     process.env.MYCELIUM_API_KEY = 'test-key-123';
     mockPrisma.apiKey.findUnique.mockImplementation(() => ({
       id: 'ak1',
+      name: 'test-key',
       scopes: ['agent:read', 'notes:write'],
       user: { id: 'u1', email: 'test@example.com', displayName: 'Test' },
     }));
@@ -39,6 +40,8 @@ describe('resolveAuth', () => {
     const result = await resolveAuth('stdio');
     expect(result.userId).toBe('u1');
     expect(result.scopes).toEqual(['agent:read', 'notes:write']);
+    expect(result.apiKeyId).toBe('ak1');
+    expect(result.apiKeyName).toBe('test-key');
   });
 
   test('throws with invalid API key (stdio)', async () => {
@@ -57,6 +60,7 @@ describe('resolveAuth', () => {
   test('resolves auth with valid Bearer header (HTTP)', async () => {
     mockPrisma.apiKey.findUnique.mockImplementation(() => ({
       id: 'ak2',
+      name: 'http-key',
       scopes: ['agent:read'],
       user: { id: 'u2', email: 'http@example.com', displayName: 'HTTP User' },
     }));
@@ -66,6 +70,8 @@ describe('resolveAuth', () => {
     const result = await resolveAuth('http', request);
     expect(result.userId).toBe('u2');
     expect(result.scopes).toEqual(['agent:read']);
+    expect(result.apiKeyId).toBe('ak2');
+    expect(result.apiKeyName).toBe('http-key');
   });
 
   test('throws with missing Authorization header (HTTP)', async () => {

@@ -17,14 +17,15 @@ enum NoteStatus {
 }
 
 model User {
-  id          String   @id @default(cuid())
-  email       String   @unique
-  password    String
-  displayName String
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  notes       Note[]
-  apiKeys     ApiKey[]
+  id           String        @id @default(cuid())
+  email        String        @unique
+  password     String
+  displayName  String
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  notes        Note[]
+  apiKeys      ApiKey[]
+  activityLogs ActivityLog[]
 
   @@index([email])
 }
@@ -75,12 +76,15 @@ model Tag {
 }
 
 model Revision {
-  id        String   @id @default(cuid())
-  content   String
-  message   String?
-  createdAt DateTime @default(now())
-  noteId    String
-  note      Note     @relation(fields: [noteId], references: [id], onDelete: Cascade)
+  id         String   @id @default(cuid())
+  content    String
+  message    String?
+  authType   String? // 'jwt' | 'apikey' | null (null for pre-existing revisions)
+  apiKeyId   String?
+  apiKeyName String?
+  createdAt  DateTime @default(now())
+  noteId     String
+  note       Note     @relation(fields: [noteId], references: [id], onDelete: Cascade)
 
   @@index([noteId])
 }
@@ -96,4 +100,22 @@ model ApiKey {
   user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([keyHash])
+}
+
+model ActivityLog {
+  id                 String   @id @default(cuid())
+  userId             String
+  apiKeyId           String
+  apiKeyName         String
+  action             String // note:create, note:update, note:archive, note:delete, note:search, note:revert, bundle:read
+  targetResourceId   String?
+  targetResourceSlug String?
+  details            Json     @default("{}")
+  status             String   @default("success") // success | error
+  createdAt          DateTime @default(now())
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([userId, action])
+  @@index([userId, apiKeyName])
 }

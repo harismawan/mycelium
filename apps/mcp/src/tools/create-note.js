@@ -12,7 +12,7 @@ import { reconcileLinks, resolveUnresolvedLinks } from '../links.js';
  * slug generation, excerpt, wikilink reconciliation, revision creation.
  *
  * @param {import('@modelcontextprotocol/sdk/server/mcp.js').McpServer} server
- * @param {{ userId: string, scopes: string[] }} auth
+ * @param {{ userId: string, scopes: string[], apiKeyId: string, apiKeyName: string }} auth
  */
 export function register(server, auth) {
   server.tool(
@@ -64,7 +64,7 @@ export function register(server, auth) {
               userId: auth.userId,
               tags: tagOps.length ? { connectOrCreate: tagOps } : undefined,
               revisions: {
-                create: { content },
+                create: { content, authType: 'apikey', apiKeyId: auth.apiKeyId, apiKeyName: auth.apiKeyName },
               },
             },
             include: { tags: true },

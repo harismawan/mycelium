@@ -1,27 +1,50 @@
 import Elysia, { t } from 'elysia';
 import { NoteStatus } from '@mycelium/shared';
 import { authMiddleware } from '../middleware/auth.js';
+import { rateLimiter } from '../middleware/rate-limiter.js';
 import { NoteService } from '../services/note.service.js';
 import { LinkService } from '../services/link.service.js';
 import { RevisionService } from '../services/revision.service.js';
+import { ActivityLogService } from '../services/activity-log.service.js';
 
 /**
  * Note route group — `/api/v1/notes`
  *
  * All routes require authentication (JWT or API key).
+ * Rate limiting is applied after auth for API-key-authenticated requests.
  *
  * @type {Elysia}
  */
 export const noteRoutes = new Elysia({ prefix: '/api/v1/notes' })
   .use(authMiddleware)
+  .use(rateLimiter())
 
   // POST / — create a new note
   .post(
     '/',
-    async (/** @type {{ body: { title: string, content: string, status?: string, tags?: string[] }, user: { id: string }, set: any }} */ ctx) => {
+    async (/** @type {{ body: { title: string, content: string, status?: string, tags?: string[] }, user: { id: string }, authType: string, apiKeyId: string|null, apiKeyName: string|null, set: any }} */ ctx) => {
       try {
-        const note = await NoteService.createNote(ctx.user.id, ctx.body);
+        const note = await NoteService.createNote(ctx.user.id, {
+          ...ctx.body,
+          authType: ctx.authType,
+          apiKeyId: ctx.apiKeyId,
+          apiKeyName: ctx.apiKeyName,
+        });
         ctx.set.status = 201;
+
+        if (ctx.authType === 'apikey') {
+          await ActivityLogService.logAction({
+            userId: ctx.user.id,
+            apiKeyId: ctx.apiKeyId,
+            apiKeyName: ctx.apiKeyName,
+            action: 'note:create',
+            targetResourceId: note.id,
+            targetResourceSlug: note.slug,
+            details: { title: ctx.body.title },
+            status: 'success',
+          });
+        }
+
         return note;
       } catch (err) {
         if (err && typeof err === 'object' && 'statusCode' in err) {
@@ -124,9 +147,28 @@ export const noteRoutes = new Elysia({ prefix: '/api/v1/notes' })
   // PATCH /:slug — partial update
   .patch(
     '/:slug',
-    async (/** @type {{ params: { slug: string }, body: { title?: string, content?: string, status?: string, tags?: string[], message?: string }, user: { id: string }, set: any }} */ ctx) => {
+    async (/** @type {{ params: { slug: string }, body: { title?: string, content?: string, status?: string, tags?: string[], message?: string }, user: { id: string }, authType: string, apiKeyId: string|null, apiKeyName: string|null, set: any }} */ ctx) => {
       try {
-        const note = await NoteService.updateNote(ctx.user.id, ctx.params.slug, ctx.body);
+        const note = await NoteService.updateNote(ctx.user.id, ctx.params.slug, {
+          ...ctx.body,
+          authType: ctx.authType,
+          apiKeyId: ctx.apiKeyId,
+          apiKeyName: ctx.apiKeyName,
+        });
+
+        if (ctx.authType === 'apikey') {
+          await ActivityLogService.logAction({
+            userId: ctx.user.id,
+            apiKeyId: ctx.apiKeyId,
+            apiKeyName: ctx.apiKeyName,
+            action: 'note:update',
+            targetResourceId: note.id,
+            targetResourceSlug: ctx.params.slug,
+            details: { fields: Object.keys(ctx.body) },
+            status: 'success',
+          });
+        }
+
         return note;
       } catch (err) {
         if (err && typeof err === 'object' && 'statusCode' in err) {
@@ -159,9 +201,23 @@ export const noteRoutes = new Elysia({ prefix: '/api/v1/notes' })
   // DELETE /:slug — archive (soft delete)
   .delete(
     '/:slug',
-    async (/** @type {{ params: { slug: string }, user: { id: string }, set: any }} */ ctx) => {
+    async (/** @type {{ params: { slug: string }, user: { id: string }, authType: string, apiKeyId: string|null, apiKeyName: string|null, set: any }} */ ctx) => {
       try {
         await NoteService.archiveNote(ctx.user.id, ctx.params.slug);
+
+        if (ctx.authType === 'apikey') {
+          await ActivityLogService.logAction({
+            userId: ctx.user.id,
+            apiKeyId: ctx.apiKeyId,
+            apiKeyName: ctx.apiKeyName,
+            action: 'note:archive',
+            targetResourceId: null,
+            targetResourceSlug: ctx.params.slug,
+            details: {},
+            status: 'success',
+          });
+        }
+
         return { message: 'Note archived' };
       } catch (err) {
         if (err && typeof err === 'object' && 'statusCode' in err) {
@@ -181,9 +237,23 @@ export const noteRoutes = new Elysia({ prefix: '/api/v1/notes' })
   // DELETE /:slug/permanent — hard delete
   .delete(
     '/:slug/permanent',
-    async (/** @type {{ params: { slug: string }, user: { id: string }, set: any }} */ ctx) => {
+    async (/** @type {{ params: { slug: string }, user: { id: string }, authType: string, apiKeyId: string|null, apiKeyName: string|null, set: any }} */ ctx) => {
       try {
         await NoteService.deleteNote(ctx.user.id, ctx.params.slug);
+
+        if (ctx.authType === 'apikey') {
+          await ActivityLogService.logAction({
+            userId: ctx.user.id,
+            apiKeyId: ctx.apiKeyId,
+            apiKeyName: ctx.apiKeyName,
+            action: 'note:delete',
+            targetResourceId: null,
+            targetResourceSlug: ctx.params.slug,
+            details: {},
+            status: 'success',
+          });
+        }
+
         return { message: 'Note deleted permanently' };
       } catch (err) {
         if (err && typeof err === 'object' && 'statusCode' in err) {
@@ -196,6 +266,54 @@ export const noteRoutes = new Elysia({ prefix: '/api/v1/notes' })
     {
       params: t.Object({
         slug: t.String({ minLength: 1 }),
+      }),
+    },
+  )
+
+  // POST /:slug/revert — revert note to a specific revision
+  .post(
+    '/:slug/revert',
+    async (/** @type {{ params: { slug: string }, body: { revisionId: string }, user: { id: string }, authType: string, apiKeyId: string|null, apiKeyName: string|null, set: any }} */ ctx) => {
+      try {
+        const note = await NoteService.revertNote(
+          ctx.user.id,
+          ctx.params.slug,
+          ctx.body.revisionId,
+          {
+            authType: ctx.authType,
+            apiKeyId: ctx.apiKeyId,
+            apiKeyName: ctx.apiKeyName,
+          },
+        );
+
+        if (ctx.authType === 'apikey') {
+          await ActivityLogService.logAction({
+            userId: ctx.user.id,
+            apiKeyId: ctx.apiKeyId,
+            apiKeyName: ctx.apiKeyName,
+            action: 'note:revert',
+            targetResourceId: note.id,
+            targetResourceSlug: ctx.params.slug,
+            details: { revisionId: ctx.body.revisionId },
+            status: 'success',
+          });
+        }
+
+        return note;
+      } catch (err) {
+        if (err && typeof err === 'object' && 'statusCode' in err) {
+          ctx.set.status = /** @type {any} */ (err).statusCode;
+          return { error: /** @type {any} */ (err).message };
+        }
+        throw err;
+      }
+    },
+    {
+      params: t.Object({
+        slug: t.String({ minLength: 1 }),
+      }),
+      body: t.Object({
+        revisionId: t.String({ minLength: 1 }),
       }),
     },
   )

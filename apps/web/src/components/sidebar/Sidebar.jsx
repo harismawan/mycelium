@@ -1,4 +1,4 @@
-import { FileText, Archive, GitBranch, Pin, Sun, Moon, LogOut, User, Settings } from 'lucide-react';
+import { FileText, Archive, GitBranch, Activity, Pin, Sun, Moon, LogOut, User, Settings } from 'lucide-react';
 import { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import styled from 'styled-components';
@@ -199,6 +199,11 @@ export default function Sidebar() {
       <NavItem $active={activeSection === 'graph' || isGraph} onClick={() => { setActiveSection('graph'); navigate('/graph'); }}>
         <NavIcon><GitBranch size={15} /></NavIcon>
         <NavLabel>Graph</NavLabel>
+      </NavItem>
+
+      <NavItem $active={activeSection === 'activity' || location.pathname === '/activity'} onClick={() => { setActiveSection('activity'); navigate('/activity'); }}>
+        <NavIcon><Activity size={15} /></NavIcon>
+        <NavLabel>Agent Activity</NavLabel>
       </NavItem>
 
       {tags.length > 0 && (

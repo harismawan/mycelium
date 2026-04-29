@@ -15,7 +15,7 @@ function hashApiKey(key) {
  * Returns the owning user and the key's scopes if valid.
  *
  * @param {string} key - The plaintext API key.
- * @returns {Promise<{ user: { id: string, email: string, displayName: string }, scopes: string[] } | null>}
+ * @returns {Promise<{ user: { id: string, email: string, displayName: string }, scopes: string[], apiKeyId: string, apiKeyName: string } | null>}
  */
 async function verifyApiKey(key) {
   const keyHash = hashApiKey(key);
@@ -38,7 +38,7 @@ async function verifyApiKey(key) {
     data: { lastUsedAt: new Date() },
   });
 
-  return { user: apiKey.user, scopes: apiKey.scopes };
+  return { user: apiKey.user, scopes: apiKey.scopes, apiKeyId: apiKey.id, apiKeyName: apiKey.name };
 }
 
 /**
@@ -46,7 +46,7 @@ async function verifyApiKey(key) {
  *
  * @param {'stdio' | 'http'} transport
  * @param {Request} [request] - HTTP request (only for HTTP transport)
- * @returns {Promise<{ userId: string, scopes: string[] }>}
+ * @returns {Promise<{ userId: string, scopes: string[], apiKeyId: string, apiKeyName: string }>}
  * @throws {Error} If API key is missing or invalid
  */
 export async function resolveAuth(transport, request) {
@@ -70,7 +70,7 @@ export async function resolveAuth(transport, request) {
     throw new Error('Invalid API key');
   }
 
-  return { userId: result.user.id, scopes: result.scopes };
+  return { userId: result.user.id, scopes: result.scopes, apiKeyId: result.apiKeyId, apiKeyName: result.apiKeyName };
 }
 
 /**

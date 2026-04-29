@@ -2,6 +2,7 @@ import { Elysia } from 'elysia';
 import { cors } from '@elysiajs/cors';
 import { swagger } from '@elysiajs/swagger';
 import { applyLogger } from './middleware/logger.js';
+import { rateLimiter } from './middleware/rate-limiter.js';
 import { healthRoutes } from './routes/health.routes.js';
 import { authRoutes } from './routes/auth.routes.js';
 import { apiKeyRoutes } from './routes/api-keys.routes.js';
@@ -9,6 +10,7 @@ import { noteRoutes } from './routes/notes.routes.js';
 import { tagRoutes } from './routes/tags.routes.js';
 import { graphRoutes } from './routes/graph.routes.js';
 import { agentRoutes } from './routes/agent.routes.js';
+import { activityLogRoutes } from './routes/activity-log.routes.js';
 
 const port = process.env.PORT || 3000;
 
@@ -47,6 +49,7 @@ app
   .use(tagRoutes)
   .use(graphRoutes)
   .use(agentRoutes)
+  .use(activityLogRoutes)
   .listen(port);
 
 console.log(`🍄 Mycelium API listening on http://localhost:${port}`);

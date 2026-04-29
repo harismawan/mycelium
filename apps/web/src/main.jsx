@@ -15,6 +15,7 @@ const RegisterPage = lazy(() => import('./pages/RegisterPage.jsx'));
 const DashboardPage = lazy(() => import('./pages/DashboardPage.jsx'));
 const EditorView = lazy(() => import('./pages/EditorView.jsx'));
 const GraphPage = lazy(() => import('./pages/GraphPage.jsx'));
+const ActivityFeedPage = lazy(() => import('./pages/ActivityFeedPage.jsx'));
 const ReadingView = lazy(() => import('./pages/ReadingView.jsx'));
 
 const GlobalStyle = createGlobalStyle`
@@ -102,6 +103,7 @@ const router = createBrowserRouter([
       { path: 'notes/:slug', element: <Suspense fallback={<PageLoader />}><EditorView /></Suspense> },
       { path: 'notes/:slug/read', element: <Suspense fallback={<PageLoader />}><ReadingView /></Suspense> },
       { path: 'graph', element: <Suspense fallback={<PageLoader />}><GraphPage /></Suspense> },
+      { path: 'activity', element: <Suspense fallback={<PageLoader />}><ActivityFeedPage /></Suspense> },
       { path: 'search', element: <SearchResults /> },
       { path: 'settings', element: <SettingsPage /> },
     ],

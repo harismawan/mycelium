@@ -13,7 +13,7 @@ import { reconcileLinks, resolveUnresolvedLinks } from '../links.js';
  * conditional revision creation.
  *
  * @param {import('@modelcontextprotocol/sdk/server/mcp.js').McpServer} server
- * @param {{ userId: string, scopes: string[] }} auth
+ * @param {{ userId: string, scopes: string[], apiKeyId: string, apiKeyName: string }} auth
  */
 export function register(server, auth) {
   server.tool(
@@ -93,7 +93,7 @@ export function register(server, auth) {
             where: { id: existing.id },
             data: {
               ...updateData,
-              ...(contentChanged ? { revisions: { create: { content, message } } } : {}),
+              ...(contentChanged ? { revisions: { create: { content, message, authType: 'apikey', apiKeyId: auth.apiKeyId, apiKeyName: auth.apiKeyName } } } : {}),
             },
             include: { tags: true },
           });

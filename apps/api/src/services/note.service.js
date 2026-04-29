@@ -20,11 +20,11 @@ export const NoteService = {
    * resolve unresolved links.
    *
    * @param {string} userId - ID of the owning user.
-   * @param {{ title: string, content: string, status?: string, tags?: string[] }} data
+   * @param {{ title: string, content: string, status?: string, tags?: string[], authType?: string, apiKeyId?: string, apiKeyName?: string }} data
    * @returns {Promise<import('@prisma/client').Note>} The created note with tags.
    */
   async createNote(userId, data) {
-    const { title, content, status, tags } = data;
+    const { title, content, status, tags, authType, apiKeyId, apiKeyName } = data;
     const excerpt = generateExcerpt(content);
     const wikilinks = extractWikilinks(content);
 
@@ -59,7 +59,12 @@ export const NoteService = {
           userId,
           tags: tagOps.length ? { connectOrCreate: tagOps } : undefined,
           revisions: {
-            create: { content },
+            create: {
+              content,
+              ...(authType ? { authType } : {}),
+              ...(apiKeyId ? { apiKeyId } : {}),
+              ...(apiKeyName ? { apiKeyName } : {}),
+            },
           },
         },
         include: { tags: true, revisions: true },
@@ -181,7 +186,7 @@ export const NoteService = {
    *
    * @param {string} userId - ID of the owning user.
    * @param {string} slug - Current note slug.
-   * @param {{ title?: string, content?: string, status?: string, tags?: string[], message?: string }} data
+   * @param {{ title?: string, content?: string, status?: string, tags?: string[], message?: string, authType?: string, apiKeyId?: string, apiKeyName?: string }} data
    * @returns {Promise<import('@prisma/client').Note>} The updated note.
    * @throws {{ statusCode: number, message: string }} 404 if not found.
    */
@@ -199,6 +204,7 @@ export const NoteService = {
     const status = data.status ?? existing.status;
     const tags = data.tags;
     const message = data.message;
+    const { authType, apiKeyId, apiKeyName } = data;
 
     const excerpt = generateExcerpt(content);
     const wikilinks = extractWikilinks(content);
@@ -249,7 +255,17 @@ export const NoteService = {
         where: { id: existing.id },
         data: {
           ...updateData,
-          ...(contentChanged ? { revisions: { create: { content, message } } } : {}),
+          ...(contentChanged ? {
+            revisions: {
+              create: {
+                content,
+                message,
+                ...(authType ? { authType } : {}),
+                ...(apiKeyId ? { apiKeyId } : {}),
+                ...(apiKeyName ? { apiKeyName } : {}),
+              },
+            },
+          } : {}),
         },
         include: { tags: true, revisions: true },
       });
@@ -287,6 +303,59 @@ export const NoteService = {
       where: { id: note.id },
       data: { status: 'ARCHIVED' },
     });
+  },
+
+  /**
+   * Revert a note to a specific revision's content.
+   *
+   * @param {string} userId
+   * @param {string} slug
+   * @param {string} revisionId
+   * @param {{ authType?: string, apiKeyId?: string, apiKeyName?: string }} [authContext={}]
+   * @returns {Promise<import('@prisma/client').Note>}
+   * @throws {{ statusCode: number, message: string }} 404 if note or revision not found.
+   */
+  async revertNote(userId, slug, revisionId, authContext = {}) {
+    const note = await prisma.note.findFirst({
+      where: { slug, userId },
+      select: { id: true },
+    });
+    if (!note) {
+      throw { statusCode: 404, message: 'Note not found' };
+    }
+
+    const revision = await prisma.revision.findFirst({
+      where: { id: revisionId, noteId: note.id },
+    });
+    if (!revision) {
+      throw { statusCode: 404, message: 'Revision not found' };
+    }
+
+    const { authType, apiKeyId, apiKeyName } = authContext;
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const result = await tx.note.update({
+        where: { id: note.id },
+        data: {
+          content: revision.content,
+          excerpt: generateExcerpt(revision.content),
+          revisions: {
+            create: {
+              content: revision.content,
+              message: `Reverted to revision ${revisionId}`,
+              ...(authType ? { authType } : {}),
+              ...(apiKeyId ? { apiKeyId } : {}),
+              ...(apiKeyName ? { apiKeyName } : {}),
+            },
+          },
+        },
+        include: { tags: true, revisions: true },
+      });
+
+      return result;
+    });
+
+    return updated;
   },
 
   /**

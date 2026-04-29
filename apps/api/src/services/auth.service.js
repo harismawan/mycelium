@@ -98,9 +98,9 @@ export const AuthService = {
 
   /**
    * Verify an API key by hashing it and looking up the hash in the database.
-   * Returns the owning user and the key's scopes if valid.
+   * Returns the owning user, the key's scopes, and the key identity if valid.
    * @param {string} key - The plaintext API key.
-   * @returns {Promise<{user: {id: string, email: string, displayName: string, createdAt: Date, updatedAt: Date}, scopes: string[]} | null>}
+   * @returns {Promise<{user: {id: string, email: string, displayName: string, createdAt: Date, updatedAt: Date}, scopes: string[], apiKeyId: string, apiKeyName: string} | null>}
    */
   async verifyApiKey(key) {
     const keyHash = hashApiKey(key);
@@ -124,7 +124,7 @@ export const AuthService = {
       data: { lastUsedAt: new Date() },
     });
 
-    return { user: apiKey.user, scopes: apiKey.scopes };
+    return { user: apiKey.user, scopes: apiKey.scopes, apiKeyId: apiKey.id, apiKeyName: apiKey.name };
   },
 
   /**

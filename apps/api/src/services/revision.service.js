@@ -21,6 +21,16 @@ export const RevisionService = {
       take: limit + 1,
       ...(opts.cursor ? { cursor: { id: opts.cursor }, skip: 1 } : {}),
       orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        content: true,
+        message: true,
+        authType: true,
+        apiKeyId: true,
+        apiKeyName: true,
+        createdAt: true,
+        noteId: true,
+      },
     });
 
     const hasMore = revisions.length > limit;
@@ -41,6 +51,16 @@ export const RevisionService = {
   async getRevision(revisionId) {
     return prisma.revision.findUnique({
       where: { id: revisionId },
+      select: {
+        id: true,
+        content: true,
+        message: true,
+        authType: true,
+        apiKeyId: true,
+        apiKeyName: true,
+        createdAt: true,
+        noteId: true,
+      },
     });
   },
 };

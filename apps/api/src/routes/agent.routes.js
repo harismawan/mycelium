@@ -1,12 +1,14 @@
 import Elysia, { t } from 'elysia';
 import { SCOPES } from '@mycelium/shared';
 import { authMiddleware, requireScopes } from '../middleware/auth.js';
+import { rateLimiter } from '../middleware/rate-limiter.js';
 import { AgentService } from '../services/agent.service.js';
 
 /**
  * Agent route group — `/api/v1/agent`
  *
  * All routes require API key authentication with the `agent:read` scope.
+ * Rate limiting is applied after auth for API-key-authenticated requests.
  * Provides machine-friendly endpoints for AI agent consumption:
  * manifest discovery, NDJSON bundle streaming, and simplified note listing.
  *
@@ -14,6 +16,7 @@ import { AgentService } from '../services/agent.service.js';
  */
 export const agentRoutes = new Elysia({ prefix: '/api/v1/agent' })
   .use(authMiddleware)
+  .use(rateLimiter())
   .use(requireScopes(SCOPES.AGENT_READ))
 
   // GET /manifest — return JSON manifest describing the agent API

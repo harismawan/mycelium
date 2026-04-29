@@ -6,6 +6,8 @@ import { AuthService } from '../services/auth.service.js';
  * @property {{ id: string, email: string, displayName: string, createdAt: Date, updatedAt: Date }} user
  * @property {'jwt' | 'apikey'} authType
  * @property {string[]} scopes
+ * @property {string|null} apiKeyId
+ * @property {string|null} apiKeyName
  */
 
 /**
@@ -13,7 +15,7 @@ import { AuthService } from '../services/auth.service.js';
  * Checks JWT cookie first (with manual fallback), then Bearer header.
  *
  * @param {{ cookie?: Record<string, any>, request: Request, set: any }} ctx
- * @returns {Promise<{ user: any, authType: string | null, scopes: string[] }>}
+ * @returns {Promise<{ user: any, authType: string | null, scopes: string[], apiKeyId: string | null, apiKeyName: string | null }>}
  */
 async function resolveAuth(ctx) {
   // 1. Check JWT cookie — handle both Elysia Cookie objects and raw strings
@@ -22,7 +24,7 @@ async function resolveAuth(ctx) {
   if (cookieValue && cookieValue !== 'undefined' && cookieValue !== '') {
     const user = await AuthService.verifyJwt(String(cookieValue));
     if (user) {
-      return { user, authType: 'jwt', scopes: ['*'] };
+      return { user, authType: 'jwt', scopes: ['*'], apiKeyId: null, apiKeyName: null };
     }
   }
 
@@ -32,7 +34,7 @@ async function resolveAuth(ctx) {
   if (authMatch && authMatch[1]) {
     const user = await AuthService.verifyJwt(authMatch[1]);
     if (user) {
-      return { user, authType: 'jwt', scopes: ['*'] };
+      return { user, authType: 'jwt', scopes: ['*'], apiKeyId: null, apiKeyName: null };
     }
   }
 
@@ -43,13 +45,13 @@ async function resolveAuth(ctx) {
     if (apiKey) {
       const result = await AuthService.verifyApiKey(apiKey);
       if (result) {
-        return { user: result.user, authType: 'apikey', scopes: result.scopes };
+        return { user: result.user, authType: 'apikey', scopes: result.scopes, apiKeyId: result.apiKeyId, apiKeyName: result.apiKeyName };
       }
     }
   }
 
   // 3. No valid credentials
-  return { user: null, authType: null, scopes: [] };
+  return { user: null, authType: null, scopes: [], apiKeyId: null, apiKeyName: null };
 }
 
 /**

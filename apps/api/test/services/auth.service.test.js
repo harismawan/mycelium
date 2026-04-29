@@ -228,9 +228,10 @@ describe('AuthService.verifyApiKey', () => {
   const keyHash = createHash('sha256').update(plainKey).digest('hex');
 
   /** Validates: Requirements 4.2, 4.5 */
-  test('returns user and scopes for valid key and updates lastUsedAt', async () => {
+  test('returns user, scopes, apiKeyId, and apiKeyName for valid key and updates lastUsedAt', async () => {
     mockApiKey.findUnique.mockResolvedValue({
       id: 'key_1',
+      name: 'my-agent-key',
       keyHash,
       scopes: ['notes:read', 'agent:read'],
       user: userWithoutPassword,
@@ -241,6 +242,8 @@ describe('AuthService.verifyApiKey', () => {
 
     expect(result.user).toEqual(userWithoutPassword);
     expect(result.scopes).toEqual(['notes:read', 'agent:read']);
+    expect(result.apiKeyId).toBe('key_1');
+    expect(result.apiKeyName).toBe('my-agent-key');
 
     // Verify the key was looked up by hash
     expect(mockApiKey.findUnique).toHaveBeenCalledWith({

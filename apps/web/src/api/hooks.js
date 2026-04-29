@@ -34,6 +34,12 @@ export const revKeys = { list: (noteId) => ['revisions', noteId] };
 /** @type {{ query: (q: string) => string[] }} */
 export const searchKeys = { query: (q) => ['search', q] };
 
+/** @type {{ all: string[], lists: (filters?: object) => unknown[] }} */
+export const activityKeys = {
+  all: ['activity-log'],
+  lists: (filters) => ['activity-log', 'list', filters],
+};
+
 // ---------------------------------------------------------------------------
 // Query hooks
 // ---------------------------------------------------------------------------
@@ -207,6 +213,47 @@ export function useArchiveNote(slug) {
       qc.invalidateQueries({ queryKey: noteKeys.all });
       qc.invalidateQueries({ queryKey: tagKeys.all });
       qc.invalidateQueries({ queryKey: graphKeys.all });
+    },
+  });
+}
+
+/**
+ * Fetch paginated activity log entries with optional filters.
+ * @param {object} [filters]
+ * @param {string} [filters.cursor]
+ * @param {number} [filters.limit]
+ * @param {string} [filters.action]
+ * @param {string} [filters.apiKeyName]
+ */
+export function useActivityLog(filters = {}) {
+  const params = new URLSearchParams();
+  if (filters.cursor) params.set('cursor', filters.cursor);
+  if (filters.limit) params.set('limit', String(filters.limit));
+  if (filters.action) params.set('action', filters.action);
+  if (filters.apiKeyName) params.set('apiKeyName', filters.apiKeyName);
+  const qs = params.toString();
+  return useQuery({
+    queryKey: activityKeys.lists(filters),
+    queryFn: () => apiGet(`/activity-log${qs ? `?${qs}` : ''}`),
+  });
+}
+
+/**
+ * Revert a note to a specific revision.
+ * Invalidates note, revision, and activity log queries on success.
+ * @param {string} slug
+ */
+export function useRevertNote(slug) {
+  const qc = useQueryClient();
+  return useMutation({
+    /** @param {{ revisionId: string }} data */
+    mutationFn: (data) => apiPost(`/notes/${slug}/revert`, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: noteKeys.all });
+      qc.invalidateQueries({ queryKey: noteKeys.detail(slug) });
+      qc.invalidateQueries({ queryKey: noteKeys.md(slug) });
+      qc.invalidateQueries({ queryKey: revKeys.list(slug) });
+      qc.invalidateQueries({ queryKey: activityKeys.all });
     },
   });
 }

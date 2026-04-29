@@ -40,4 +40,5 @@ export const SCOPES = Object.freeze({
   NOTES_READ: 'notes:read',
   NOTES_WRITE: 'notes:write',
   AGENT_READ: 'agent:read',
+  ACTIVITY_LOG_WRITE: 'activity-log:read',
 });

@@ -3,6 +3,7 @@ import { cors } from '@elysiajs/cors';
 import { swagger } from '@elysiajs/swagger';
 import { applyLogger } from './middleware/logger.js';
 import { rateLimiter } from './middleware/rate-limiter.js';
+import { connectRedis } from '@mycelium/shared/redis';
 import { healthRoutes } from './routes/health.routes.js';
 import { authRoutes } from './routes/auth.routes.js';
 import { apiKeyRoutes } from './routes/api-keys.routes.js';
@@ -13,6 +14,14 @@ import { agentRoutes } from './routes/agent.routes.js';
 import { activityLogRoutes } from './routes/activity-log.routes.js';
 
 const port = process.env.PORT || 3000;
+
+// Connect to Redis before starting the server
+try {
+  await connectRedis();
+} catch (err) {
+  console.error('❌ Failed to connect to Redis:', err.message);
+  process.exit(1);
+}
 
 /**
  * Main Elysia application.

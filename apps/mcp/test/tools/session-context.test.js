@@ -1,8 +1,57 @@
-import { describe, test, expect, beforeEach } from 'bun:test';
-import { getSessionStore, destroySession, validateSessionLimits } from '../../src/session.js';
-import { register as registerSet } from '../../src/tools/set-session-context.js';
-import { register as registerGet } from '../../src/tools/get-session-context.js';
-import { register as registerList } from '../../src/tools/list-session-context.js';
+import { describe, test, expect, beforeEach, mock } from 'bun:test';
+
+// ---------------------------------------------------------------------------
+// Mock Redis implementation — in-memory Map simulating Redis commands
+// ---------------------------------------------------------------------------
+
+let store = new Map();
+let sets = new Map();
+let ttls = new Map();
+
+function resetStore() {
+  store = new Map();
+  sets = new Map();
+  ttls = new Map();
+}
+
+const mockRedisClient = {
+  get: async (key) => store.get(key) ?? null,
+  set: async (key, value) => { store.set(key, value); },
+  del: async (...keys) => {
+    for (const k of keys) {
+      store.delete(k);
+      sets.delete(k);
+      ttls.delete(k);
+    }
+  },
+  exists: async (key) => (store.has(key) || sets.has(key)) ? 1 : 0,
+  sadd: async (key, ...members) => {
+    if (!sets.has(key)) sets.set(key, new Set());
+    const s = sets.get(key);
+    for (const m of members) s.add(m);
+  },
+  smembers: async (key) => {
+    const s = sets.get(key);
+    return s ? [...s] : [];
+  },
+  expire: async (key, seconds) => {
+    ttls.set(key, seconds);
+    return 1;
+  },
+  ttl: async (key) => ttls.get(key) ?? -1,
+};
+
+mock.module('@mycelium/shared/redis', () => ({
+  getRedisClient: () => mockRedisClient,
+  prefixKey: (key) => `mycelium:${key}`,
+  isRedisConnected: () => true,
+}));
+
+// Import session module AFTER mocking Redis
+const { destroySession } = await import('../../src/session.js');
+const { register: registerSet } = await import('../../src/tools/set-session-context.js');
+const { register: registerGet } = await import('../../src/tools/get-session-context.js');
+const { register: registerList } = await import('../../src/tools/list-session-context.js');
 
 function createMockServer() {
   const tools = new Map();
@@ -22,8 +71,9 @@ const auth = { userId: USER_ID, scopes: ['agent:read'] };
 describe('session context tools', () => {
   let setHandler, getHandler, listHandler;
 
-  beforeEach(() => {
-    destroySession(USER_ID);
+  beforeEach(async () => {
+    resetStore();
+    await destroySession(USER_ID);
 
     const server = createMockServer();
     registerSet(server, auth);
@@ -75,9 +125,10 @@ describe('session context tools', () => {
   });
 
   test('rejects 101st key when 100 keys already stored', async () => {
-    const store = getSessionStore(USER_ID);
+    // Fill 100 keys via the Redis-backed session store
     for (let i = 0; i < 100; i++) {
-      store.set(`key-${i}`, `val-${i}`);
+      const err = await setHandler({ key: `key-${i}`, value: `val-${i}` });
+      expect(err.isError).toBeUndefined();
     }
 
     const result = await setHandler({ key: 'overflow', value: 'nope' });
@@ -96,7 +147,7 @@ describe('session context tools', () => {
 
   test('session cleanup: destroySession clears all keys', async () => {
     await setHandler({ key: 'temp', value: 'data' });
-    destroySession(USER_ID);
+    await destroySession(USER_ID);
 
     const result = await getHandler({ key: 'temp' });
     const parsed = JSON.parse(result.content[0].text);

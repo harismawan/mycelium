@@ -315,9 +315,13 @@ export default function NoteListPanel() {
     const isShift = e.shiftKey;
 
     if (isMeta) {
-      // Toggle individual selection
+      // Toggle individual selection — also include the currently active note
       setSelectedSlugs((prev) => {
         const next = new Set(prev);
+        // Include the currently viewed note if starting a new selection
+        if (next.size === 0 && selectedSlug) {
+          next.add(selectedSlug);
+        }
         if (next.has(note.slug)) next.delete(note.slug);
         else next.add(note.slug);
         return next;
@@ -327,24 +331,27 @@ export default function NoteListPanel() {
     }
 
     if (isShift) {
-      // Range selection — use index 0 as anchor if no prior click
-      const anchor = lastClickedIndex.current ?? 0;
+      // Range selection — use the currently active note as anchor if no explicit anchor
+      let anchor = lastClickedIndex.current;
+      if (anchor === null) {
+        anchor = notes.findIndex((n) => n.slug === selectedSlug);
+        if (anchor === -1) anchor = index;
+      }
       const start = Math.min(anchor, index);
       const end = Math.max(anchor, index);
-      setSelectedSlugs((prev) => {
-        const next = new Set(prev);
-        for (let i = start; i <= end; i++) {
-          if (notes[i]) next.add(notes[i].slug);
-        }
-        return next;
-      });
-      lastClickedIndex.current = index;
+      const next = new Set();
+      for (let i = start; i <= end; i++) {
+        if (notes[i]) next.add(notes[i].slug);
+      }
+      setSelectedSlugs(next);
+      lastClickedIndex.current = anchor;
       return;
     }
 
     // Plain click — navigate (clear selection if any)
     if (selectedSlugs.size > 0) {
       setSelectedSlugs(new Set());
+      lastClickedIndex.current = null;
     }
     navigate(`/notes/${note.slug}`);
   };
@@ -452,7 +459,7 @@ export default function NoteListPanel() {
           {statusFilter === 'ARCHIVED' && (
             <BulkBtn onClick={() => setBulkAction('delete')}>Delete</BulkBtn>
           )}
-          <BulkBtn onClick={() => setSelectedSlugs(new Set())}>Clear</BulkBtn>
+          <BulkBtn onClick={() => { setSelectedSlugs(new Set()); lastClickedIndex.current = null; }}>Clear</BulkBtn>
         </BulkBar>
       )}
 

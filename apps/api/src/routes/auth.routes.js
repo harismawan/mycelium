@@ -3,6 +3,8 @@ import { AuthService } from '../services/auth.service.js';
 import { SessionService } from '../services/session.service.js';
 import { authMiddleware, AUTH_COOKIE_OPTIONS, REFRESH_COOKIE_OPTIONS, clearAuthCookies } from '../middleware/auth.js';
 import { isRedisConnected } from '@mycelium/shared/redis';
+import { generateCsrfToken, CSRF_COOKIE_OPTIONS } from '../utils/csrf.js';
+import { csrfMiddleware } from '../middleware/csrf.js';
 
 /**
  * Auth route group — `/api/v1/auth`
@@ -68,6 +70,12 @@ export const authRoutes = new Elysia({ prefix: '/api/v1/auth' })
           value: tokens.refreshToken,
         });
 
+        // Set CSRF cookie (readable by SPA JavaScript)
+        ctx.cookie.csrf.set({
+          ...CSRF_COOKIE_OPTIONS,
+          value: generateCsrfToken(),
+        });
+
         return { user, accessToken: tokens.accessToken };
       } catch (err) {
         if (err && typeof err === 'object' && 'statusCode' in err) {
@@ -122,6 +130,12 @@ export const authRoutes = new Elysia({ prefix: '/api/v1/auth' })
           value: result.accessToken,
         });
 
+        // Set CSRF cookie (readable by SPA JavaScript)
+        ctx.cookie.csrf.set({
+          ...CSRF_COOKIE_OPTIONS,
+          value: generateCsrfToken(),
+        });
+
         return { token: result.accessToken };
       } catch (err) {
         ctx.set.status = 503;
@@ -133,6 +147,7 @@ export const authRoutes = new Elysia({ prefix: '/api/v1/auth' })
   // ── Protected routes ───────────────────────────────────────────
 
   .use(authMiddleware)
+  .use(csrfMiddleware)
 
   .post('/logout', async (/** @type {{ cookie: Record<string, any>, set: any }} */ ctx) => {
     try {
@@ -158,6 +173,12 @@ export const authRoutes = new Elysia({ prefix: '/api/v1/auth' })
     });
     ctx.cookie.refresh.set({
       ...REFRESH_COOKIE_OPTIONS,
+      value: '',
+      maxAge: 0,
+    });
+    // Clear CSRF cookie
+    ctx.cookie.csrf.set({
+      ...CSRF_COOKIE_OPTIONS,
       value: '',
       maxAge: 0,
     });

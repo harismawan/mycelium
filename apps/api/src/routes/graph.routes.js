@@ -1,5 +1,6 @@
 import Elysia, { t } from 'elysia';
 import { authMiddleware } from '../middleware/auth.js';
+import { csrfMiddleware } from '../middleware/csrf.js';
 import { LinkService } from '../services/link.service.js';
 
 /**
@@ -11,6 +12,7 @@ import { LinkService } from '../services/link.service.js';
  */
 export const graphRoutes = new Elysia({ prefix: '/api/v1/graph' })
   .use(authMiddleware)
+  .use(csrfMiddleware)
 
   // GET / — full knowledge graph
   .get(

@@ -31,8 +31,15 @@ function generateRequestId() {
  * @returns {string | null} The CSRF token value, or null if the cookie is absent.
  */
 export function getCsrfToken() {
-  const match = document.cookie.match(/(?:^|;\s*)csrf=([^;]+)/);
-  return match ? match[1] : null;
+  const cookies = document.cookie.split(';');
+  for (const cookie of cookies) {
+    const [name, ...rest] = cookie.trim().split('=');
+    if (name === 'csrf') {
+      const value = rest.join('='); // handle '=' in base64 values
+      return value ? decodeURIComponent(value) : null;
+    }
+  }
+  return null;
 }
 
 /**

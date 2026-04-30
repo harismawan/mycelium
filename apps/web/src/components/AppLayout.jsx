@@ -66,8 +66,7 @@ export default function AppLayout() {
   const location = useLocation();
   const isGraphPage = location.pathname === '/graph';
   const isActivityPage = location.pathname === '/activity';
-  const isSettingsPage = location.pathname === '/settings';
-  const hideNoteList = isGraphPage || isActivityPage || isSettingsPage;
+  const hideNoteList = isGraphPage || isActivityPage;
   // Initialize theme hook so data-theme attribute is set
   useTheme();
 

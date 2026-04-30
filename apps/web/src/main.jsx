@@ -17,7 +17,6 @@ const EditorView = lazy(() => import('./pages/EditorView.jsx'));
 const GraphPage = lazy(() => import('./pages/GraphPage.jsx'));
 const ActivityFeedPage = lazy(() => import('./pages/ActivityFeedPage.jsx'));
 const ReadingView = lazy(() => import('./pages/ReadingView.jsx'));
-const SettingsPage = lazy(() => import('./pages/SettingsPage.jsx'));
 
 const GlobalStyle = createGlobalStyle`
   *, *::before, *::after {
@@ -76,6 +75,9 @@ function PageLoader() {
 function SearchResults() {
   return <div style={{ padding: 24 }}>Search results placeholder</div>;
 }
+function SettingsPage() {
+  return <div style={{ padding: 24 }}>Settings placeholder</div>;
+}
 
 const queryClient = new QueryClient();
 const theme = {};
@@ -103,7 +105,7 @@ const router = createBrowserRouter([
       { path: 'graph', element: <Suspense fallback={<PageLoader />}><GraphPage /></Suspense> },
       { path: 'activity', element: <Suspense fallback={<PageLoader />}><ActivityFeedPage /></Suspense> },
       { path: 'search', element: <SearchResults /> },
-      { path: 'settings', element: <Suspense fallback={<PageLoader />}><SettingsPage /></Suspense> },
+      { path: 'settings', element: <SettingsPage /> },
     ],
   },
 ]);

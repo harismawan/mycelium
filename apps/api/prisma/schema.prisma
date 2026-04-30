@@ -39,6 +39,7 @@ model Note {
   excerpt     String?
   status      NoteStatus @default(DRAFT)
   pinned      Boolean    @default(false)
+  searchVector Unsupported("tsvector")? @ignore
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
   userId      String
@@ -51,6 +52,7 @@ model Note {
   @@index([slug])
   @@index([status])
   @@index([userId])
+  @@index([userId, status, createdAt])
 }
 
 model Link {

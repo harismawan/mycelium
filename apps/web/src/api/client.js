@@ -2,7 +2,9 @@
  * Fetch wrapper for Mycelium API calls.
  *
  * All requests include `credentials: 'include'` so the httpOnly JWT cookie
- * is sent automatically. Non-ok responses throw an `ApiError`.
+ * is sent automatically. State-changing requests (POST, PATCH, DELETE)
+ * include the `x-csrf-token` header read from the `csrf` cookie.
+ * Non-ok responses throw an `ApiError`.
  */
 
 const BASE = '/api/v1';
@@ -12,6 +14,35 @@ const BASE = '/api/v1';
  * @property {number} status
  * @property {string} message
  */
+
+/**
+ * Read the CSRF token from the `csrf` cookie.
+ *
+ * @returns {string | null} The CSRF token value, or null if the cookie is absent.
+ */
+export function getCsrfToken() {
+  const match = document.cookie.match(/(?:^|;\s*)csrf=([^;]+)/);
+  return match ? match[1] : null;
+}
+
+/**
+ * Build headers for a state-changing request.
+ * Includes Content-Type and the x-csrf-token header when the csrf cookie exists.
+ *
+ * @param {boolean} [includeContentType=true] - Whether to include Content-Type: application/json
+ * @returns {Record<string, string>}
+ */
+function buildMutationHeaders(includeContentType = true) {
+  const headers = {};
+  if (includeContentType) {
+    headers['Content-Type'] = 'application/json';
+  }
+  const csrfToken = getCsrfToken();
+  if (csrfToken) {
+    headers['x-csrf-token'] = csrfToken;
+  }
+  return headers;
+}
 
 /**
  * Throw a structured error for non-ok responses.
@@ -53,7 +84,7 @@ export async function apiGet(path) {
 export async function apiPost(path, body) {
   const res = await fetch(`${BASE}${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: buildMutationHeaders(),
     credentials: 'include',
     body: JSON.stringify(body),
   });
@@ -70,7 +101,7 @@ export async function apiPost(path, body) {
 export async function apiPatch(path, body) {
   const res = await fetch(`${BASE}${path}`, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
+    headers: buildMutationHeaders(),
     credentials: 'include',
     body: JSON.stringify(body),
   });
@@ -86,6 +117,7 @@ export async function apiPatch(path, body) {
 export async function apiDelete(path) {
   const res = await fetch(`${BASE}${path}`, {
     method: 'DELETE',
+    headers: buildMutationHeaders(false),
     credentials: 'include',
   });
   if (!res.ok) return handleError(res);

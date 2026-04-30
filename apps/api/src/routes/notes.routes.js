@@ -1,6 +1,7 @@
 import Elysia, { t } from 'elysia';
 import { NoteStatus } from '@mycelium/shared';
 import { authMiddleware } from '../middleware/auth.js';
+import { csrfMiddleware } from '../middleware/csrf.js';
 import { rateLimiter } from '../middleware/rate-limiter.js';
 import { NoteService } from '../services/note.service.js';
 import { LinkService } from '../services/link.service.js';
@@ -17,6 +18,7 @@ import { ActivityLogService } from '../services/activity-log.service.js';
  */
 export const noteRoutes = new Elysia({ prefix: '/api/v1/notes' })
   .use(authMiddleware)
+  .use(csrfMiddleware)
   .use(rateLimiter())
 
   // POST / — create a new note

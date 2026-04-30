@@ -1,6 +1,7 @@
 import Elysia, { t } from 'elysia';
 import { SCOPES } from '@mycelium/shared';
 import { authMiddleware, requireScopes } from '../middleware/auth.js';
+import { csrfMiddleware } from '../middleware/csrf.js';
 import { rateLimiter } from '../middleware/rate-limiter.js';
 import { AgentService } from '../services/agent.service.js';
 
@@ -16,6 +17,7 @@ import { AgentService } from '../services/agent.service.js';
  */
 export const agentRoutes = new Elysia({ prefix: '/api/v1/agent' })
   .use(authMiddleware)
+  .use(csrfMiddleware)
   .use(rateLimiter())
   .use(requireScopes(SCOPES.AGENT_READ))
 

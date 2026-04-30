@@ -1,6 +1,7 @@
 import Elysia, { t } from 'elysia';
 import { DEFAULT_PAGE_LIMIT } from '@mycelium/shared';
 import { authMiddleware } from '../middleware/auth.js';
+import { csrfMiddleware } from '../middleware/csrf.js';
 import { prisma } from '../db.js';
 
 /**
@@ -12,6 +13,7 @@ import { prisma } from '../db.js';
  */
 export const tagRoutes = new Elysia({ prefix: '/api/v1/tags' })
   .use(authMiddleware)
+  .use(csrfMiddleware)
 
   // GET / — list all tags with note counts
   .get(

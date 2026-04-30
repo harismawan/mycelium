@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'crypto';
 import Elysia, { t } from 'elysia';
 import { prisma } from '../db.js';
 import { authMiddleware } from '../middleware/auth.js';
+import { csrfMiddleware } from '../middleware/csrf.js';
 
 /**
  * Generate a new API key with `myc_` prefix and its SHA-256 hash.
@@ -33,6 +34,7 @@ function requireJwt(ctx) {
  */
 export const apiKeyRoutes = new Elysia({ prefix: '/api/v1/api-keys' })
   .use(authMiddleware)
+  .use(csrfMiddleware)
   .onBeforeHandle(requireJwt)
 
   // POST / — create a new API key

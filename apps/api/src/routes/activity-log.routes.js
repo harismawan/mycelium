@@ -1,5 +1,6 @@
 import Elysia, { t } from 'elysia';
 import { authMiddleware } from '../middleware/auth.js';
+import { csrfMiddleware } from '../middleware/csrf.js';
 import { rateLimiter } from '../middleware/rate-limiter.js';
 import { ActivityLogService } from '../services/activity-log.service.js';
 
@@ -13,6 +14,7 @@ import { ActivityLogService } from '../services/activity-log.service.js';
  */
 export const activityLogRoutes = new Elysia({ prefix: '/api/v1/activity-log' })
   .use(authMiddleware)
+  .use(csrfMiddleware)
   .use(rateLimiter())
 
   // GET / — list activity log entries with optional filters and cursor pagination

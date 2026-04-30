@@ -19,7 +19,7 @@ export function applyLogger(app) {
       ctx.request._startTime = performance.now();
     })
     .onAfterResponse(
-      (/** @type {{ request: Request, set: { status?: number } }} */ ctx) => {
+      (/** @type {{ request: Request, set: { status?: number }, requestId?: string }} */ ctx) => {
         // @ts-ignore
         const start = ctx.request._startTime;
         const responseTime = start != null ? Math.round(performance.now() - start) : -1;
@@ -37,6 +37,7 @@ export function applyLogger(app) {
             path: pathname,
             status: ctx.set.status ?? 200,
             responseTime,
+            requestId: ctx.requestId,
           }),
         );
       },

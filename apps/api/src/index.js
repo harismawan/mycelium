@@ -2,6 +2,7 @@ import { Elysia } from 'elysia';
 import { cors } from '@elysiajs/cors';
 import { swagger } from '@elysiajs/swagger';
 import { applyLogger } from './middleware/logger.js';
+import { requestIdMiddleware } from './middleware/request-id.js';
 import { connectRedis } from '@mycelium/shared/redis';
 import { healthRoutes } from './routes/health.routes.js';
 import { authRoutes } from './routes/auth.routes.js';
@@ -44,7 +45,8 @@ const app = new Elysia()
         },
       },
     }),
-  );
+  )
+  .use(requestIdMiddleware);
 
 // Apply logger directly on root app so hooks cover all routes
 applyLogger(app);

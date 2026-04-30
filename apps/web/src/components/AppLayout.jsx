@@ -1,4 +1,4 @@
-import { Outlet } from 'react-router-dom';
+import { Outlet, useLocation } from 'react-router-dom';
 import styled from 'styled-components';
 import { useUIStore } from '../stores/uiStore.js';
 import { useTheme } from '../hooks/useTheme.js';
@@ -63,6 +63,11 @@ const RightColumn = styled.aside`
 export default function AppLayout() {
   const sidebarOpen = useUIStore((s) => s.sidebarOpen);
   const rightPaneOpen = useUIStore((s) => s.rightPaneOpen);
+  const location = useLocation();
+  const isGraphPage = location.pathname === '/graph';
+  const isActivityPage = location.pathname === '/activity';
+  const isSettingsPage = location.pathname === '/settings';
+  const hideNoteList = isGraphPage || isActivityPage || isSettingsPage;
   // Initialize theme hook so data-theme attribute is set
   useTheme();
 
@@ -76,15 +81,17 @@ export default function AppLayout() {
         </NavColumn>
       )}
 
-      <NoteListColumn aria-label="Note list">
-        <NoteListPanel />
-      </NoteListColumn>
+      {!hideNoteList && (
+        <NoteListColumn aria-label="Note list">
+          <NoteListPanel />
+        </NoteListColumn>
+      )}
 
       <CenterColumn>
         <Outlet />
       </CenterColumn>
 
-      {rightPaneOpen && (
+      {rightPaneOpen && !hideNoteList && (
         <RightColumn aria-label="Properties panel">
           <RightPane />
         </RightColumn>

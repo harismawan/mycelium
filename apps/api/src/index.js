@@ -2,7 +2,6 @@ import { Elysia } from 'elysia';
 import { cors } from '@elysiajs/cors';
 import { swagger } from '@elysiajs/swagger';
 import { applyLogger } from './middleware/logger.js';
-import { rateLimiter } from './middleware/rate-limiter.js';
 import { connectRedis } from '@mycelium/shared/redis';
 import { healthRoutes } from './routes/health.routes.js';
 import { authRoutes } from './routes/auth.routes.js';

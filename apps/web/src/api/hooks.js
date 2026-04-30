@@ -34,6 +34,9 @@ export const revKeys = { list: (noteId) => ['revisions', noteId] };
 /** @type {{ query: (q: string) => string[] }} */
 export const searchKeys = { query: (q) => ['search', q] };
 
+/** @type {{ all: string[] }} */
+export const apiKeyKeys = { all: ['api-keys'] };
+
 /** @type {{ all: string[], lists: (filters?: object) => unknown[] }} */
 export const activityKeys = {
   all: ['activity-log'],
@@ -255,6 +258,50 @@ export function useRevertNote(slug) {
       qc.invalidateQueries({ queryKey: revKeys.list(slug) });
       qc.invalidateQueries({ queryKey: activityKeys.all });
       qc.invalidateQueries({ queryKey: tagKeys.all });
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// API Key hooks
+// ---------------------------------------------------------------------------
+
+/**
+ * Fetch all API keys for the authenticated user.
+ */
+export function useApiKeys() {
+  return useQuery({
+    queryKey: apiKeyKeys.all,
+    queryFn: () => apiGet('/api-keys'),
+  });
+}
+
+/**
+ * Create a new API key.
+ * Invalidates the API keys list on success.
+ */
+export function useCreateApiKey() {
+  const qc = useQueryClient();
+  return useMutation({
+    /** @param {{ name: string, scopes?: string[] }} data */
+    mutationFn: (data) => apiPost('/api-keys', data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: apiKeyKeys.all });
+    },
+  });
+}
+
+/**
+ * Delete an API key by ID.
+ * Invalidates the API keys list on success.
+ */
+export function useDeleteApiKey() {
+  const qc = useQueryClient();
+  return useMutation({
+    /** @param {string} id */
+    mutationFn: (id) => apiDelete(`/api-keys/${id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: apiKeyKeys.all });
     },
   });
 }

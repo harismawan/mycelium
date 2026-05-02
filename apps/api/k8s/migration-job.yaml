@@ -1,0 +1,23 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: mycelium-migrate
+spec:
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app: mycelium-migrate
+    spec:
+      restartPolicy: Never
+      imagePullSecrets:
+        - name: ghcr-creds
+      containers:
+        - name: migrate
+          image: ghcr.io/harismawan/mycelium-api:latest
+          imagePullPolicy: Always
+          command: ["bunx", "prisma", "migrate", "deploy"]
+          workingDir: /app/apps/api
+          envFrom:
+            - secretRef:
+                name: mycelium-secrets

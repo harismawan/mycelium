@@ -1,0 +1,104 @@
+name: CD
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Image tag to deploy (defaults to latest)"
+        required: false
+        default: "latest"
+      apply_manifest:
+        description: "Apply k8s manifests first (true/false)"
+        required: false
+        default: "false"
+
+env:
+  NAMESPACE: default
+  API_DEPLOYMENT: mycelium-api
+  WEB_DEPLOYMENT: mycelium-web
+  MCP_DEPLOYMENT: mycelium-mcp
+
+jobs:
+  deploy:
+    name: Deploy to MicroK8s
+    runs-on: self-hosted
+    environment: production
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Verify cluster connection
+        run: |
+          kubectl cluster-info
+          kubectl get nodes
+
+      - name: Set image tag
+        id: set-tag
+        run: |
+          TAG="${{ github.event.inputs.image_tag }}"
+          if [ -z "$TAG" ] || [ "$TAG" = "latest" ]; then
+            TAG="latest"
+          fi
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Deploying with image tag: $TAG"
+
+      - name: Apply manifests
+        if: github.event.inputs.apply_manifest == 'true'
+        run: |
+          echo "Applying Mycelium manifests..."
+          kubectl apply -k apps/api/k8s -n ${{ env.NAMESPACE }}
+          kubectl apply -k apps/web/k8s -n ${{ env.NAMESPACE }}
+          kubectl apply -k apps/mcp/k8s -n ${{ env.NAMESPACE }}
+
+      - name: Run database migrations
+        run: |
+          echo "Running Prisma migrations..."
+          kubectl delete job mycelium-migrate -n ${{ env.NAMESPACE }} --ignore-not-found
+          kubectl apply -f apps/api/k8s/migration-job.yaml -n ${{ env.NAMESPACE }}
+          kubectl wait --for=condition=complete job/mycelium-migrate -n ${{ env.NAMESPACE }} --timeout=300s
+
+      - name: Update deployment images
+        run: |
+          TAG="${{ steps.set-tag.outputs.tag }}"
+          echo "Deploying Mycelium images with tag: $TAG"
+
+          kubectl set image deployment/${{ env.API_DEPLOYMENT }} \
+            mycelium-api=ghcr.io/harismawan/mycelium-api:$TAG \
+            -n ${{ env.NAMESPACE }}
+
+          kubectl set image deployment/${{ env.WEB_DEPLOYMENT }} \
+            mycelium-web=ghcr.io/harismawan/mycelium-web:$TAG \
+            -n ${{ env.NAMESPACE }}
+
+          kubectl set image deployment/${{ env.MCP_DEPLOYMENT }} \
+            mycelium-mcp=ghcr.io/harismawan/mycelium-mcp:$TAG \
+            -n ${{ env.NAMESPACE }}
+
+      - name: Wait for rollout
+        run: |
+          kubectl rollout status deployment/${{ env.API_DEPLOYMENT }} -n ${{ env.NAMESPACE }} --timeout=300s
+          kubectl rollout status deployment/${{ env.WEB_DEPLOYMENT }} -n ${{ env.NAMESPACE }} --timeout=300s
+          kubectl rollout status deployment/${{ env.MCP_DEPLOYMENT }} -n ${{ env.NAMESPACE }} --timeout=300s
+
+      - name: Verify deployment
+        run: |
+          echo "=== Deployment Status ==="
+          kubectl get deployments -n ${{ env.NAMESPACE }} | grep -E 'mycelium-(api|web|mcp)'
+          echo ""
+          echo "=== Pod Status ==="
+          kubectl get pods -n ${{ env.NAMESPACE }} | grep mycelium
+          echo ""
+          echo "=== Services ==="
+          kubectl get svc -n ${{ env.NAMESPACE }} | grep -E 'mycelium|^api\b'
+          echo ""
+          echo "=== Recent Events ==="
+          kubectl get events -n ${{ env.NAMESPACE }} --sort-by='.lastTimestamp' | tail -10
+
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          echo "Deployment failed, initiating rollback..."
+          kubectl rollout undo deployment/${{ env.API_DEPLOYMENT }} -n ${{ env.NAMESPACE }} || true
+          kubectl rollout undo deployment/${{ env.WEB_DEPLOYMENT }} -n ${{ env.NAMESPACE }} || true
+          kubectl rollout undo deployment/${{ env.MCP_DEPLOYMENT }} -n ${{ env.NAMESPACE }} || true

@@ -3,12 +3,12 @@ WORKDIR /app
 
 # Install dependencies
 FROM base AS deps
-COPY package.json ./
+COPY package.json bun.lock ./
 COPY apps/api/package.json apps/api/
 COPY apps/web/package.json apps/web/
 COPY apps/mcp/package.json apps/mcp/
 COPY packages/shared/package.json packages/shared/
-RUN bun install --production
+RUN bun install --frozen-lockfile
 
 # Build prisma client
 FROM deps AS build

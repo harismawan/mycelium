@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mycelium-mcp
+spec:
+  selector:
+    matchLabels:
+      app: mycelium-mcp
+  template:
+    metadata:
+      labels:
+        app: mycelium-mcp
+    spec:
+      imagePullSecrets:
+        - name: ghcr-creds
+      containers:
+        - name: mycelium-mcp
+          image: ghcr.io/harismawan/mycelium-mcp:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3001
+          resources:
+            limits:
+              memory: "512Mi"
+              cpu: 1
+            requests:
+              memory: "128Mi"
+              cpu: 0.1
+          envFrom:
+            - configMapRef:
+                name: mycelium-config
+            - secretRef:
+                name: mycelium-secrets
+          readinessProbe:
+            tcpSocket:
+              port: 3001
+            initialDelaySeconds: 5
+            periodSeconds: 5

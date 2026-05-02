@@ -1,0 +1,12 @@
+apiVersion: autoscaling/v1
+kind: HorizontalPodAutoscaler
+metadata:
+  name: mycelium-mcp-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: mycelium-mcp
+  minReplicas: 1
+  maxReplicas: 2
+  targetCPUUtilizationPercentage: 80

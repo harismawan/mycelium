@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mycelium-config
+data:
+  NODE_ENV: "production"
+  PORT: "3000"
+  MCP_TRANSPORT: "http"
+  MCP_PORT: "3001"
+  REDIS_URL: "redis://mycelium-redis-service:6379"
+  CORS_ORIGIN: "https://mycelium.harismawan.com"

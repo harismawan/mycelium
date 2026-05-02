@@ -1,0 +1,34 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mycelium-web
+spec:
+  selector:
+    matchLabels:
+      app: mycelium-web
+  template:
+    metadata:
+      labels:
+        app: mycelium-web
+    spec:
+      imagePullSecrets:
+        - name: ghcr-creds
+      containers:
+        - name: mycelium-web
+          image: ghcr.io/harismawan/mycelium-web:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 80
+          resources:
+            limits:
+              memory: "256Mi"
+              cpu: 1
+            requests:
+              memory: "64Mi"
+              cpu: 0.1
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 10

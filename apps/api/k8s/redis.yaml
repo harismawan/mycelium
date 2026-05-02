@@ -1,0 +1,67 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mycelium-redis-data
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mycelium-redis
+spec:
+  selector:
+    matchLabels:
+      app: mycelium-redis
+  template:
+    metadata:
+      labels:
+        app: mycelium-redis
+    spec:
+      containers:
+        - name: redis
+          image: docker.io/library/redis:8-alpine
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 6379
+          resources:
+            limits:
+              memory: "256Mi"
+              cpu: 0.5
+            requests:
+              memory: "64Mi"
+              cpu: 0.05
+          volumeMounts:
+            - name: redis-data
+              mountPath: /data
+          livenessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+      volumes:
+        - name: redis-data
+          persistentVolumeClaim:
+            claimName: mycelium-redis-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mycelium-redis-service
+spec:
+  selector:
+    app: mycelium-redis
+  ports:
+    - protocol: TCP
+      port: 6379
+      targetPort: 6379
+  type: ClusterIP

@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  # Short name keeps the existing nginx.conf proxy_pass http://api:3000 working inside Kubernetes.
+  name: api
+spec:
+  selector:
+    app: mycelium-api
+  ports:
+    - protocol: TCP
+      port: 3000
+      targetPort: 3000
+  type: ClusterIP

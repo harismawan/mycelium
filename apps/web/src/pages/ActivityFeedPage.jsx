@@ -209,6 +209,22 @@ const DetailsPre = styled.pre`
   word-break: break-word;
 `;
 
+const DetailsToggleButton = styled.button`
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  width: fit-content;
+
+  &:hover {
+    background: var(--color-bg-hover);
+    color: var(--color-text);
+  }
+`;
+
 const EmptyState = styled.div`
   display: flex;
   align-items: center;
@@ -312,6 +328,7 @@ export default function ActivityFeedPage() {
   const [allEntries, setAllEntries] = useState([]);
   const [currentCursor, setCurrentCursor] = useState(undefined);
   const [hasLoadedMore, setHasLoadedMore] = useState(false);
+  const [detailsVisibleById, setDetailsVisibleById] = useState({});
 
   // Build filters for the hook
   const filters = useMemo(() => {
@@ -344,6 +361,7 @@ export default function ActivityFeedPage() {
     setCurrentCursor(undefined);
     setAllEntries([]);
     setHasLoadedMore(false);
+    setDetailsVisibleById({});
   }, []);
 
   const handleApiKeyNameChange = useCallback((e) => {
@@ -351,6 +369,7 @@ export default function ActivityFeedPage() {
     setCurrentCursor(undefined);
     setAllEntries([]);
     setHasLoadedMore(false);
+    setDetailsVisibleById({});
   }, []);
 
   const handleLoadMore = useCallback(() => {
@@ -359,6 +378,13 @@ export default function ActivityFeedPage() {
     setCurrentCursor(nextCursor);
     setHasLoadedMore(true);
   }, [nextCursor, entries]);
+
+  const toggleDetailsVisibility = useCallback((entryId) => {
+    setDetailsVisibleById((prev) => ({
+      ...prev,
+      [entryId]: !prev[entryId],
+    }));
+  }, []);
 
   // Determine what to render
   const showLoading = isLoading && entries.length === 0;
@@ -440,7 +466,16 @@ export default function ActivityFeedPage() {
                 {formatDetailsJson(entry.details) && (
                   <MetaRow style={{ display: 'block' }}>
                     <MetaLabel>details</MetaLabel>
-                    <DetailsPre>{formatDetailsJson(entry.details)}</DetailsPre>
+                    <DetailsToggleButton
+                      type="button"
+                      onClick={() => toggleDetailsVisibility(entry.id)}
+                      aria-expanded={Boolean(detailsVisibleById[entry.id])}
+                    >
+                      {detailsVisibleById[entry.id] ? 'Hide details' : 'Show details'}
+                    </DetailsToggleButton>
+                    {detailsVisibleById[entry.id] && (
+                      <DetailsPre>{formatDetailsJson(entry.details)}</DetailsPre>
+                    )}
                   </MetaRow>
                 )}
               </EntryCard>

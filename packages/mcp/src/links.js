@@ -1,7 +1,7 @@
 /**
  * Shared link reconciliation helpers for MCP write tools.
  *
- * Replicated from apps/api/src/services/note.service.js to avoid
+ * Replicated from packages/api/src/services/note.service.js to avoid
  * cross-app imports. Operates on a Prisma transaction client.
  *
  * @module links

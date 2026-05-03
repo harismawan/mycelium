@@ -198,16 +198,16 @@ bun install
 docker compose up -d
 
 # 3. Run migrations
-bunx --cwd apps/api prisma migrate dev
+bunx --cwd packages/api prisma migrate dev
 
 # 4. Seed demo data
-bunx --cwd apps/api prisma db seed
+bunx --cwd packages/api prisma db seed
 
 # 5. Start the API
-bun run --cwd apps/api src/index.js
+bun run --cwd packages/api src/index.js
 
 # 6. Start the SPA (separate terminal)
-bun run --cwd apps/web dev
+bun run --cwd packages/web dev
 ```
 
 The SPA runs at `http://localhost:5173`, API at `http://localhost:3000`.
@@ -218,7 +218,7 @@ The SPA runs at `http://localhost:5173`, API at `http://localhost:3000`.
 MYCELIUM_API_KEY=myc_demo_agent_key_for_testing \
 DATABASE_URL=postgresql://mycelium:mycelium@localhost:5432/mycelium \
 REDIS_URL=redis://localhost:6379 \
-bun run apps/mcp/src/index.js
+bun run packages/mcp/src/index.js
 ```
 
 ---
@@ -285,7 +285,7 @@ Exposes the knowledge base to AI agents via the [Model Context Protocol](https:/
   "mcpServers": {
     "mycelium": {
       "command": "bun",
-      "args": ["run", "apps/mcp/src/index.js"],
+      "args": ["run", "packages/mcp/src/index.js"],
       "env": {
         "MYCELIUM_API_KEY": "myc_demo_agent_key_for_testing",
         "DATABASE_URL": "postgresql://mycelium:mycelium@localhost:5432/mycelium"
@@ -320,10 +320,10 @@ Exposes the knowledge base to AI agents via the [Model Context Protocol](https:/
 
 ```bash
 # API unit + property tests
-bun test --cwd apps/api
+bun test --cwd packages/api
 
 # MCP server tests
-bun test --cwd apps/mcp
+bun test --cwd packages/mcp
 
 # Shared package tests
 bun test --cwd packages/shared

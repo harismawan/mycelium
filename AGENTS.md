@@ -189,7 +189,7 @@ All agent endpoints return standard error responses:
 
 # Mycelium MCP Server
 
-In addition to the REST agent API, Mycelium ships an [MCP](https://modelcontextprotocol.io/) server (`apps/mcp/`) that exposes the knowledge base to AI agents (Claude Desktop, Cursor, Kiro, etc.) over JSON-RPC. The MCP server reuses the existing services and API key authentication — no separate credential system.
+In addition to the REST agent API, Mycelium ships an [MCP](https://modelcontextprotocol.io/) server (`packages/mcp/`) that exposes the knowledge base to AI agents (Claude Desktop, Cursor, Kiro, etc.) over JSON-RPC. The MCP server reuses the existing services and API key authentication — no separate credential system.
 
 ## Connecting
 
@@ -202,14 +202,14 @@ The server supports two transports:
 
 ### stdio (auto-configuration)
 
-MCP clients can auto-discover the server using the `apps/mcp/mcp.json` config:
+MCP clients can auto-discover the server using the `packages/mcp/mcp.json` config:
 
 ```json
 {
   "mcpServers": {
     "mycelium": {
       "command": "bun",
-      "args": ["run", "apps/mcp/src/index.js"],
+      "args": ["run", "packages/mcp/src/index.js"],
       "env": {
         "MYCELIUM_API_KEY": "",
         "DATABASE_URL": ""
@@ -224,13 +224,13 @@ Copy the entry into your client's MCP config, fill in `MYCELIUM_API_KEY` and `DA
 Equivalent manual command:
 
 ```bash
-MYCELIUM_API_KEY=myc_... DATABASE_URL=postgres://... bun run apps/mcp/src/index.js
+MYCELIUM_API_KEY=myc_... DATABASE_URL=postgres://... bun run packages/mcp/src/index.js
 ```
 
 ### Streamable HTTP
 
 ```bash
-MCP_TRANSPORT=http MCP_PORT=3001 DATABASE_URL=postgres://... bun run apps/mcp/src/index.js
+MCP_TRANSPORT=http MCP_PORT=3001 DATABASE_URL=postgres://... bun run packages/mcp/src/index.js
 ```
 
 Clients POST JSON-RPC to `http://<host>:3001/mcp` with `Authorization: Bearer <key>`.
@@ -390,14 +390,14 @@ claw install mycelium-knowledge-base
 
 ### Manual
 
-Copy the `apps/mcp/skill.json` manifest into your OpenClaw skills directory, or add the MCP entry directly to your agent config:
+Copy the `packages/mcp/skill.json` manifest into your OpenClaw skills directory, or add the MCP entry directly to your agent config:
 
 ```json
 {
   "mcpServers": {
     "mycelium": {
       "command": "bun",
-      "args": ["run", "apps/mcp/src/index.js"],
+      "args": ["run", "packages/mcp/src/index.js"],
       "env": {
         "MYCELIUM_API_KEY": "<your_api_key>",
         "DATABASE_URL": "<your_postgres_connection_string>"
@@ -431,7 +431,7 @@ After configuring the skill, verify the MCP server connects and tools are availa
 
 ```bash
 # Start the server manually to test
-MYCELIUM_API_KEY=myc_... DATABASE_URL=postgres://... bun run apps/mcp/src/index.js
+MYCELIUM_API_KEY=myc_... DATABASE_URL=postgres://... bun run packages/mcp/src/index.js
 ```
 
 From your OpenClaw agent, invoke `list_notes` with an empty filter. A successful response confirms authentication, database connectivity, and tool registration:

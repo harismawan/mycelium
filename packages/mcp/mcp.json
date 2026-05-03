@@ -2,7 +2,7 @@
   "mcpServers": {
     "mycelium": {
       "command": "bun",
-      "args": ["run", "apps/mcp/src/index.js"],
+      "args": ["run", "packages/mcp/src/index.js"],
       "env": {
         "MYCELIUM_API_KEY": "",
         "DATABASE_URL": ""

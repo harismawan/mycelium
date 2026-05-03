@@ -1,20 +1,4 @@
 services:
-  postgres:
-    image: postgres:16
-    profiles: ["localdb"]
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: mycelium
-      POSTGRES_PASSWORD: mycelium
-      POSTGRES_DB: mycelium
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U mycelium"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-
   redis:
     image: redis:8-alpine
     restart: unless-stopped
@@ -29,7 +13,7 @@ services:
   api:
     build:
       context: .
-      dockerfile: apps/api/Dockerfile
+      dockerfile: packages/api/Dockerfile
     restart: unless-stopped
     depends_on:
       redis:
@@ -38,6 +22,7 @@ services:
       DATABASE_URL: ${DATABASE_URL}
       JWT_SECRET: ${JWT_SECRET}
       REDIS_URL: redis://redis:6379
+      CORS_ORIGIN: ${CORS_ORIGIN}
       PORT: "3000"
       NODE_ENV: production
     ports:
@@ -46,7 +31,7 @@ services:
   web:
     build:
       context: .
-      dockerfile: apps/web/Dockerfile
+      dockerfile: packages/web/Dockerfile
     restart: unless-stopped
     depends_on:
       - api
@@ -56,7 +41,7 @@ services:
   mcp:
     build:
       context: .
-      dockerfile: apps/mcp/Dockerfile
+      dockerfile: packages/mcp/Dockerfile
     restart: unless-stopped
     depends_on:
       redis:
@@ -74,12 +59,11 @@ services:
   migrate:
     build:
       context: .
-      dockerfile: apps/api/Dockerfile
+      dockerfile: packages/api/Dockerfile
     command: bunx prisma migrate deploy
     environment:
       DATABASE_URL: ${DATABASE_URL}
     restart: "no"
 
 volumes:
-  pgdata:
   redisdata:

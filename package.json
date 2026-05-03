@@ -3,9 +3,9 @@
   "private": true,
   "type": "module",
   "workspaces": [
-    "apps/api",
-    "apps/web",
-    "apps/mcp",
+    "packages/api",
+    "packages/web",
+    "packages/mcp",
     "packages/shared"
   ]
 }

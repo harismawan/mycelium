@@ -3,7 +3,7 @@ node_modules/
 
 # Build output
 dist/
-apps/web/dist/
+packages/web/dist/
 
 # Environment
 .env
@@ -11,7 +11,7 @@ apps/web/dist/
 !.env.example
 
 # Prisma
-apps/api/prisma/*.db
+packages/api/prisma/*.db
 
 # IDE
 .kiro/
@@ -32,4 +32,4 @@ Thumbs.db
 bun.lock
 
 # Vite
-apps/web/node_modules/.vite/
+packages/web/node_modules/.vite/

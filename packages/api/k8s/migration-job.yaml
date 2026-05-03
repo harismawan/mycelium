@@ -17,7 +17,7 @@ spec:
           image: ghcr.io/harismawan/mycelium-api:latest
           imagePullPolicy: Always
           command: ["bunx", "prisma", "migrate", "deploy"]
-          workingDir: /app/apps/api
+          workingDir: /app/packages/api
           envFrom:
             - secretRef:
                 name: mycelium-secrets

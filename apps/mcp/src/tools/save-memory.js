@@ -1,9 +1,10 @@
-import { z } from 'zod';
-import { generateExcerpt, extractWikilinks, slugify } from '@mycelium/shared';
-import { checkScopes } from '../auth.js';
-import { log } from '../logger.js';
-import { prisma } from '../db.js';
-import { reconcileLinks, resolveUnresolvedLinks } from '../links.js';
+import { z } from "zod";
+import { generateExcerpt, extractWikilinks, slugify } from "@mycelium/shared";
+import { checkScopes } from "../auth.js";
+import { log } from "../logger.js";
+import { logMcpAction } from "../activity-log.js";
+import { prisma } from "../db.js";
+import { reconcileLinks, resolveUnresolvedLinks } from "../links.js";
 
 /**
  * Register the `save_memory` tool on the MCP server.
@@ -16,21 +17,21 @@ import { reconcileLinks, resolveUnresolvedLinks } from '../links.js';
  */
 export function register(server, auth) {
   server.tool(
-    'save_memory',
+    "save_memory",
     'Save a finding or summary as a note. Auto-tagged with "agent-memory" and published immediately.',
     {
-      title: z.string().min(1, 'title is required'),
+      title: z.string().min(1, "title is required"),
       content: z.string(),
       tags: z.array(z.string()).optional(),
     },
     async ({ title, content, tags }) => {
-      const scopeError = checkScopes(['notes:write'], auth.scopes);
+      const scopeError = checkScopes(["notes:write"], auth.scopes);
       if (scopeError) return scopeError;
 
       const start = performance.now();
       try {
         // Merge agent-memory tag, deduplicate via Set
-        const allTags = [...new Set([...(tags ?? []), 'agent-memory'])];
+        const allTags = [...new Set([...(tags ?? []), "agent-memory"])];
 
         const excerpt = generateExcerpt(content);
         const wikilinks = extractWikilinks(content);
@@ -62,7 +63,7 @@ export function register(server, auth) {
               content,
               slug,
               excerpt,
-              status: 'PUBLISHED',
+              status: "PUBLISHED",
               userId: auth.userId,
               tags: { connectOrCreate: tagOps },
               revisions: {
@@ -83,12 +84,50 @@ export function register(server, auth) {
           slug: note.slug,
         };
 
-        log('info', 'tool.call', { tool: 'save_memory', durationMs: performance.now() - start, success: true });
-        return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+        await logMcpAction(auth, {
+          action: "mcp:save_memory",
+
+          status: "success",
+
+          details: { durationMs: performance.now() - start, success: true },
+        });
+
+        log("info", "tool.call", {
+          tool: "save_memory",
+          durationMs: performance.now() - start,
+          success: true,
+        });
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
       } catch (err) {
-        log('error', 'tool.call', { tool: 'save_memory', durationMs: performance.now() - start, success: false, error: err.message });
+        await logMcpAction(auth, {
+          action: "mcp:save_memory",
+
+          status: "error",
+
+          details: {
+            durationMs: performance.now() - start,
+            success: false,
+            error: err.message,
+          },
+        });
+
+        log("error", "tool.call", {
+          tool: "save_memory",
+          durationMs: performance.now() - start,
+          success: false,
+          error: err.message,
+        });
         return {
-          content: [{ type: 'text', text: JSON.stringify({ error: 'Database error', message: err.message, isRetryable: true }) }],
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                error: "Database error",
+                message: err.message,
+                isRetryable: true,
+              }),
+            },
+          ],
           isError: true,
         };
       }

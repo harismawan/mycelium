@@ -1,7 +1,8 @@
-import { z } from 'zod';
-import { checkScopes } from '../auth.js';
-import { log } from '../logger.js';
-import { prisma } from '../db.js';
+import { z } from "zod";
+import { checkScopes } from "../auth.js";
+import { log } from "../logger.js";
+import { logMcpAction } from "../activity-log.js";
+import { prisma } from "../db.js";
 
 /**
  * Register the `get_graph` tool on the MCP server.
@@ -15,14 +16,14 @@ import { prisma } from '../db.js';
  */
 export function register(server, auth) {
   server.tool(
-    'get_graph',
-    'Get the knowledge graph or an ego-subgraph centered on a note',
+    "get_graph",
+    "Get the knowledge graph or an ego-subgraph centered on a note",
     {
       slug: z.string().optional(),
       depth: z.number().int().min(1).max(5).optional().default(1),
     },
     async ({ slug, depth }) => {
-      const scopeError = checkScopes(['agent:read'], auth.scopes);
+      const scopeError = checkScopes(["agent:read"], auth.scopes);
       if (scopeError) return scopeError;
 
       const start = performance.now();
@@ -36,12 +37,50 @@ export function register(server, auth) {
           result = await getEgoSubgraph(auth.userId, slug, depth);
         }
 
-        log('info', 'tool.call', { tool: 'get_graph', durationMs: performance.now() - start, success: true });
-        return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+        await logMcpAction(auth, {
+          action: "mcp:get_graph",
+
+          status: "success",
+
+          details: { durationMs: performance.now() - start, success: true },
+        });
+
+        log("info", "tool.call", {
+          tool: "get_graph",
+          durationMs: performance.now() - start,
+          success: true,
+        });
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
       } catch (err) {
-        log('error', 'tool.call', { tool: 'get_graph', durationMs: performance.now() - start, success: false, error: err.message });
+        await logMcpAction(auth, {
+          action: "mcp:get_graph",
+
+          status: "error",
+
+          details: {
+            durationMs: performance.now() - start,
+            success: false,
+            error: err.message,
+          },
+        });
+
+        log("error", "tool.call", {
+          tool: "get_graph",
+          durationMs: performance.now() - start,
+          success: false,
+          error: err.message,
+        });
         return {
-          content: [{ type: 'text', text: JSON.stringify({ error: 'Database error', message: err.message, isRetryable: true }) }],
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                error: "Database error",
+                message: err.message,
+                isRetryable: true,
+              }),
+            },
+          ],
           isError: true,
         };
       }
@@ -57,7 +96,7 @@ export function register(server, auth) {
  */
 async function getFullGraph(userId) {
   const notes = await prisma.note.findMany({
-    where: { userId, status: { not: 'ARCHIVED' } },
+    where: { userId, status: { not: "ARCHIVED" } },
     select: { id: true, slug: true, title: true, status: true },
   });
 
@@ -78,11 +117,14 @@ async function getFullGraph(userId) {
   // Only include edges where both endpoints are in the node set
   const edges = links
     .filter((l) => noteIds.has(l.toId))
-    .map((l) => ({ fromId: l.fromId, toId: l.toId, relation: l.relation ?? null }));
+    .map((l) => ({
+      fromId: l.fromId,
+      toId: l.toId,
+      relation: l.relation ?? null,
+    }));
 
   return { nodes: notes, edges };
 }
-
 
 /**
  * Return an ego-subgraph starting from a note, traversing links up to
@@ -95,7 +137,7 @@ async function getFullGraph(userId) {
  */
 async function getEgoSubgraph(userId, slug, depth) {
   const startNote = await prisma.note.findFirst({
-    where: { slug, userId, status: { not: 'ARCHIVED' } },
+    where: { slug, userId, status: { not: "ARCHIVED" } },
     select: { id: true, slug: true, title: true, status: true },
   });
 
@@ -132,7 +174,11 @@ async function getEgoSubgraph(userId, slug, depth) {
       const edgeKey = `${link.fromId}->${link.toId}`;
       if (!edgeSet.has(edgeKey)) {
         edgeSet.add(edgeKey);
-        edges.push({ fromId: link.fromId, toId: link.toId, relation: link.relation ?? null });
+        edges.push({
+          fromId: link.fromId,
+          toId: link.toId,
+          relation: link.relation ?? null,
+        });
       }
 
       if (!visited.has(link.toId)) neighborIds.add(link.toId);
@@ -146,7 +192,7 @@ async function getEgoSubgraph(userId, slug, depth) {
       where: {
         id: { in: [...neighborIds] },
         userId,
-        status: { not: 'ARCHIVED' },
+        status: { not: "ARCHIVED" },
       },
       select: { id: true, slug: true, title: true, status: true },
     });
@@ -161,7 +207,9 @@ async function getEgoSubgraph(userId, slug, depth) {
   }
 
   // Filter edges to only include those where both endpoints are in visited set
-  const validEdges = edges.filter((e) => visited.has(e.fromId) && visited.has(e.toId));
+  const validEdges = edges.filter(
+    (e) => visited.has(e.fromId) && visited.has(e.toId),
+  );
 
   return { nodes: [...visited.values()], edges: validEdges };
 }

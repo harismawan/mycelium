@@ -1,9 +1,10 @@
-import { z } from 'zod';
-import { generateExcerpt, extractWikilinks, slugify } from '@mycelium/shared';
-import { checkScopes } from '../auth.js';
-import { log } from '../logger.js';
-import { prisma } from '../db.js';
-import { reconcileLinks, resolveUnresolvedLinks } from '../links.js';
+import { z } from "zod";
+import { generateExcerpt, extractWikilinks, slugify } from "@mycelium/shared";
+import { checkScopes } from "../auth.js";
+import { log } from "../logger.js";
+import { logMcpAction } from "../activity-log.js";
+import { prisma } from "../db.js";
+import { reconcileLinks, resolveUnresolvedLinks } from "../links.js";
 
 /**
  * Register the `create_note` tool on the MCP server.
@@ -16,16 +17,16 @@ import { reconcileLinks, resolveUnresolvedLinks } from '../links.js';
  */
 export function register(server, auth) {
   server.tool(
-    'create_note',
-    'Create a new note in the knowledge base',
+    "create_note",
+    "Create a new note in the knowledge base",
     {
-      title: z.string().min(1, 'title is required'),
+      title: z.string().min(1, "title is required"),
       content: z.string(),
-      status: z.enum(['DRAFT', 'PUBLISHED', 'ARCHIVED']).optional(),
+      status: z.enum(["DRAFT", "PUBLISHED", "ARCHIVED"]).optional(),
       tags: z.array(z.string()).optional(),
     },
     async ({ title, content, status, tags }) => {
-      const scopeError = checkScopes(['notes:write'], auth.scopes);
+      const scopeError = checkScopes(["notes:write"], auth.scopes);
       if (scopeError) return scopeError;
 
       const start = performance.now();
@@ -60,11 +61,16 @@ export function register(server, auth) {
               content,
               slug,
               excerpt,
-              status: status ?? 'DRAFT',
+              status: status ?? "DRAFT",
               userId: auth.userId,
               tags: tagOps.length ? { connectOrCreate: tagOps } : undefined,
               revisions: {
-                create: { content, authType: 'apikey', apiKeyId: auth.apiKeyId, apiKeyName: auth.apiKeyName },
+                create: {
+                  content,
+                  authType: "apikey",
+                  apiKeyId: auth.apiKeyId,
+                  apiKeyName: auth.apiKeyName,
+                },
               },
             },
             include: { tags: true },
@@ -84,12 +90,50 @@ export function register(server, auth) {
           tags: note.tags.map((t) => t.name),
         };
 
-        log('info', 'tool.call', { tool: 'create_note', durationMs: performance.now() - start, success: true });
-        return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+        await logMcpAction(auth, {
+          action: "mcp:create_note",
+
+          status: "success",
+
+          details: { durationMs: performance.now() - start, success: true },
+        });
+
+        log("info", "tool.call", {
+          tool: "create_note",
+          durationMs: performance.now() - start,
+          success: true,
+        });
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
       } catch (err) {
-        log('error', 'tool.call', { tool: 'create_note', durationMs: performance.now() - start, success: false, error: err.message });
+        await logMcpAction(auth, {
+          action: "mcp:create_note",
+
+          status: "error",
+
+          details: {
+            durationMs: performance.now() - start,
+            success: false,
+            error: err.message,
+          },
+        });
+
+        log("error", "tool.call", {
+          tool: "create_note",
+          durationMs: performance.now() - start,
+          success: false,
+          error: err.message,
+        });
         return {
-          content: [{ type: 'text', text: JSON.stringify({ error: 'Database error', message: err.message, isRetryable: true }) }],
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                error: "Database error",
+                message: err.message,
+                isRetryable: true,
+              }),
+            },
+          ],
           isError: true,
         };
       }

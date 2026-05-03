@@ -1,7 +1,8 @@
-import { z } from 'zod';
-import { checkScopes } from '../auth.js';
-import { log } from '../logger.js';
-import { prisma } from '../db.js';
+import { z } from "zod";
+import { checkScopes } from "../auth.js";
+import { log } from "../logger.js";
+import { logMcpAction } from "../activity-log.js";
+import { prisma } from "../db.js";
 
 /**
  * Register the `get_backlinks` tool on the MCP server.
@@ -14,13 +15,13 @@ import { prisma } from '../db.js';
  */
 export function register(server, auth) {
   server.tool(
-    'get_backlinks',
-    'Get all notes that link to a given note (backlinks)',
+    "get_backlinks",
+    "Get all notes that link to a given note (backlinks)",
     {
-      slug: z.string().min(1, 'slug is required'),
+      slug: z.string().min(1, "slug is required"),
     },
     async ({ slug }) => {
-      const scopeError = checkScopes(['agent:read'], auth.scopes);
+      const scopeError = checkScopes(["agent:read"], auth.scopes);
       if (scopeError) return scopeError;
 
       const start = performance.now();
@@ -31,9 +32,26 @@ export function register(server, auth) {
         });
 
         if (!note) {
-          log('info', 'tool.call', { tool: 'get_backlinks', durationMs: performance.now() - start, success: true });
+          await logMcpAction(auth, {
+            action: "mcp:get_backlinks",
+
+            status: "success",
+
+            details: { durationMs: performance.now() - start, success: true },
+          });
+
+          log("info", "tool.call", {
+            tool: "get_backlinks",
+            durationMs: performance.now() - start,
+            success: true,
+          });
           return {
-            content: [{ type: 'text', text: JSON.stringify({ error: 'Note not found', slug }) }],
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({ error: "Note not found", slug }),
+              },
+            ],
             isError: true,
           };
         }
@@ -44,8 +62,20 @@ export function register(server, auth) {
         });
 
         if (!links.length) {
-          log('info', 'tool.call', { tool: 'get_backlinks', durationMs: performance.now() - start, success: true });
-          return { content: [{ type: 'text', text: JSON.stringify([]) }] };
+          await logMcpAction(auth, {
+            action: "mcp:get_backlinks",
+
+            status: "success",
+
+            details: { durationMs: performance.now() - start, success: true },
+          });
+
+          log("info", "tool.call", {
+            tool: "get_backlinks",
+            durationMs: performance.now() - start,
+            success: true,
+          });
+          return { content: [{ type: "text", text: JSON.stringify([]) }] };
         }
 
         const fromIds = [...new Set(links.map((l) => l.fromId))];
@@ -62,12 +92,50 @@ export function register(server, auth) {
           tags: n.tags.map((t) => t.name),
         }));
 
-        log('info', 'tool.call', { tool: 'get_backlinks', durationMs: performance.now() - start, success: true });
-        return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+        await logMcpAction(auth, {
+          action: "mcp:get_backlinks",
+
+          status: "success",
+
+          details: { durationMs: performance.now() - start, success: true },
+        });
+
+        log("info", "tool.call", {
+          tool: "get_backlinks",
+          durationMs: performance.now() - start,
+          success: true,
+        });
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
       } catch (err) {
-        log('error', 'tool.call', { tool: 'get_backlinks', durationMs: performance.now() - start, success: false, error: err.message });
+        await logMcpAction(auth, {
+          action: "mcp:get_backlinks",
+
+          status: "error",
+
+          details: {
+            durationMs: performance.now() - start,
+            success: false,
+            error: err.message,
+          },
+        });
+
+        log("error", "tool.call", {
+          tool: "get_backlinks",
+          durationMs: performance.now() - start,
+          success: false,
+          error: err.message,
+        });
         return {
-          content: [{ type: 'text', text: JSON.stringify({ error: 'Database error', message: err.message, isRetryable: true }) }],
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                error: "Database error",
+                message: err.message,
+                isRetryable: true,
+              }),
+            },
+          ],
           isError: true,
         };
       }

@@ -1,8 +1,9 @@
-import { z } from 'zod';
-import { DEFAULT_PAGE_LIMIT } from '@mycelium/shared';
-import { checkScopes } from '../auth.js';
-import { log } from '../logger.js';
-import { prisma } from '../db.js';
+import { z } from "zod";
+import { DEFAULT_PAGE_LIMIT } from "@mycelium/shared";
+import { checkScopes } from "../auth.js";
+import { log } from "../logger.js";
+import { logMcpAction } from "../activity-log.js";
+import { prisma } from "../db.js";
 
 /**
  * Register the `list_notes` tool on the MCP server.
@@ -14,17 +15,17 @@ import { prisma } from '../db.js';
  */
 export function register(server, auth) {
   server.tool(
-    'list_notes',
-    'List notes with optional filters and cursor-based pagination',
+    "list_notes",
+    "List notes with optional filters and cursor-based pagination",
     {
-      status: z.enum(['DRAFT', 'PUBLISHED', 'ARCHIVED']).optional(),
+      status: z.enum(["DRAFT", "PUBLISHED", "ARCHIVED"]).optional(),
       tag: z.string().optional(),
       query: z.string().optional(),
       cursor: z.string().optional(),
       limit: z.number().int().min(1).max(100).optional(),
     },
     async ({ status, tag, query, cursor, limit }) => {
-      const scopeError = checkScopes(['agent:read'], auth.scopes);
+      const scopeError = checkScopes(["agent:read"], auth.scopes);
       if (scopeError) return scopeError;
 
       const start = performance.now();
@@ -37,7 +38,7 @@ export function register(server, auth) {
         if (status) {
           where.status = status;
         } else {
-          where.status = { not: 'ARCHIVED' };
+          where.status = { not: "ARCHIVED" };
         }
 
         if (tag) {
@@ -46,8 +47,8 @@ export function register(server, auth) {
 
         if (query) {
           where.OR = [
-            { title: { contains: query, mode: 'insensitive' } },
-            { content: { contains: query, mode: 'insensitive' } },
+            { title: { contains: query, mode: "insensitive" } },
+            { content: { contains: query, mode: "insensitive" } },
           ];
         }
 
@@ -55,7 +56,7 @@ export function register(server, auth) {
           where,
           take: take + 1,
           ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-          orderBy: { createdAt: 'desc' },
+          orderBy: { createdAt: "desc" },
           include: { tags: true },
         });
 
@@ -75,12 +76,50 @@ export function register(server, auth) {
           nextCursor: hasMore ? notes[notes.length - 1].id : null,
         };
 
-        log('info', 'tool.call', { tool: 'list_notes', durationMs: performance.now() - start, success: true });
-        return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+        await logMcpAction(auth, {
+          action: "mcp:list_notes",
+
+          status: "success",
+
+          details: { durationMs: performance.now() - start, success: true },
+        });
+
+        log("info", "tool.call", {
+          tool: "list_notes",
+          durationMs: performance.now() - start,
+          success: true,
+        });
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
       } catch (err) {
-        log('error', 'tool.call', { tool: 'list_notes', durationMs: performance.now() - start, success: false, error: err.message });
+        await logMcpAction(auth, {
+          action: "mcp:list_notes",
+
+          status: "error",
+
+          details: {
+            durationMs: performance.now() - start,
+            success: false,
+            error: err.message,
+          },
+        });
+
+        log("error", "tool.call", {
+          tool: "list_notes",
+          durationMs: performance.now() - start,
+          success: false,
+          error: err.message,
+        });
         return {
-          content: [{ type: 'text', text: JSON.stringify({ error: 'Database error', message: err.message, isRetryable: true }) }],
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                error: "Database error",
+                message: err.message,
+                isRetryable: true,
+              }),
+            },
+          ],
           isError: true,
         };
       }

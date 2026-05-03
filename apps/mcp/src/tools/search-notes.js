@@ -1,9 +1,10 @@
-import { z } from 'zod';
-import { Prisma } from '@prisma/client';
-import { DEFAULT_PAGE_LIMIT } from '@mycelium/shared';
-import { checkScopes } from '../auth.js';
-import { log } from '../logger.js';
-import { prisma } from '../db.js';
+import { z } from "zod";
+import { Prisma } from "@prisma/client";
+import { DEFAULT_PAGE_LIMIT } from "@mycelium/shared";
+import { checkScopes } from "../auth.js";
+import { log } from "../logger.js";
+import { logMcpAction } from "../activity-log.js";
+import { prisma } from "../db.js";
 
 /**
  * Register the `search_notes` tool on the MCP server.
@@ -16,16 +17,16 @@ import { prisma } from '../db.js';
  */
 export function register(server, auth) {
   server.tool(
-    'search_notes',
-    'Full-text search across the knowledge base',
+    "search_notes",
+    "Full-text search across the knowledge base",
     {
-      query: z.string().min(1, 'query is required'),
+      query: z.string().min(1, "query is required"),
       tag: z.string().optional(),
-      status: z.enum(['DRAFT', 'PUBLISHED', 'ARCHIVED']).optional(),
+      status: z.enum(["DRAFT", "PUBLISHED", "ARCHIVED"]).optional(),
       limit: z.number().int().min(1).max(100).optional(),
     },
     async ({ query, tag, status, limit }) => {
-      const scopeError = checkScopes(['agent:read'], auth.scopes);
+      const scopeError = checkScopes(["agent:read"], auth.scopes);
       if (scopeError) return scopeError;
 
       const start = performance.now();
@@ -44,7 +45,7 @@ export function register(server, auth) {
           conditions.push(Prisma.sql`n."status" != 'ARCHIVED'`);
         }
 
-        const whereClause = Prisma.sql`WHERE ${Prisma.join(conditions, ' AND ')}`;
+        const whereClause = Prisma.sql`WHERE ${Prisma.join(conditions, " AND ")}`;
 
         // Optional tag join
         let joinClause = Prisma.empty;
@@ -65,12 +66,50 @@ export function register(server, auth) {
           LIMIT ${take}
         `;
 
-        log('info', 'tool.call', { tool: 'search_notes', durationMs: performance.now() - start, success: true });
-        return { content: [{ type: 'text', text: JSON.stringify(results) }] };
+        await logMcpAction(auth, {
+          action: "mcp:search_notes",
+
+          status: "success",
+
+          details: { durationMs: performance.now() - start, success: true },
+        });
+
+        log("info", "tool.call", {
+          tool: "search_notes",
+          durationMs: performance.now() - start,
+          success: true,
+        });
+        return { content: [{ type: "text", text: JSON.stringify(results) }] };
       } catch (err) {
-        log('error', 'tool.call', { tool: 'search_notes', durationMs: performance.now() - start, success: false, error: err.message });
+        await logMcpAction(auth, {
+          action: "mcp:search_notes",
+
+          status: "error",
+
+          details: {
+            durationMs: performance.now() - start,
+            success: false,
+            error: err.message,
+          },
+        });
+
+        log("error", "tool.call", {
+          tool: "search_notes",
+          durationMs: performance.now() - start,
+          success: false,
+          error: err.message,
+        });
         return {
-          content: [{ type: 'text', text: JSON.stringify({ error: 'Database error', message: err.message, isRetryable: true }) }],
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                error: "Database error",
+                message: err.message,
+                isRetryable: true,
+              }),
+            },
+          ],
           isError: true,
         };
       }

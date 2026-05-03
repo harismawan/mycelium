@@ -1,6 +1,7 @@
-import { checkScopes } from '../auth.js';
-import { log } from '../logger.js';
-import { listSessionValues } from '../session.js';
+import { checkScopes } from "../auth.js";
+import { log } from "../logger.js";
+import { logMcpAction } from "../activity-log.js";
+import { listSessionValues } from "../session.js";
 
 /**
  * Register the `list_session_context` tool on the MCP server.
@@ -12,23 +13,62 @@ import { listSessionValues } from '../session.js';
  */
 export function register(server, auth) {
   server.tool(
-    'list_session_context',
-    'List all key-value pairs in the ephemeral session context.',
+    "list_session_context",
+    "List all key-value pairs in the ephemeral session context.",
     {},
     async () => {
-      const scopeError = checkScopes(['agent:read'], auth.scopes);
+      const scopeError = checkScopes(["agent:read"], auth.scopes);
       if (scopeError) return scopeError;
 
       const start = performance.now();
       try {
         const entries = await listSessionValues(auth.userId);
 
-        log('info', 'tool.call', { tool: 'list_session_context', durationMs: performance.now() - start, success: true });
-        return { content: [{ type: 'text', text: JSON.stringify({ entries }) }] };
-      } catch (err) {
-        log('error', 'tool.call', { tool: 'list_session_context', durationMs: performance.now() - start, success: false, error: err.message });
+        await logMcpAction(auth, {
+          action: "mcp:list_session_context",
+
+          status: "success",
+
+          details: { durationMs: performance.now() - start, success: true },
+        });
+
+        log("info", "tool.call", {
+          tool: "list_session_context",
+          durationMs: performance.now() - start,
+          success: true,
+        });
         return {
-          content: [{ type: 'text', text: JSON.stringify({ error: 'Internal error', message: err.message }) }],
+          content: [{ type: "text", text: JSON.stringify({ entries }) }],
+        };
+      } catch (err) {
+        await logMcpAction(auth, {
+          action: "mcp:list_session_context",
+
+          status: "error",
+
+          details: {
+            durationMs: performance.now() - start,
+            success: false,
+            error: err.message,
+          },
+        });
+
+        log("error", "tool.call", {
+          tool: "list_session_context",
+          durationMs: performance.now() - start,
+          success: false,
+          error: err.message,
+        });
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                error: "Internal error",
+                message: err.message,
+              }),
+            },
+          ],
           isError: true,
         };
       }

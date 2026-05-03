@@ -1,8 +1,9 @@
-import { z } from 'zod';
-import { serializeFrontmatter } from '@mycelium/shared';
-import { checkScopes } from '../auth.js';
-import { log } from '../logger.js';
-import { prisma } from '../db.js';
+import { z } from "zod";
+import { serializeFrontmatter } from "@mycelium/shared";
+import { checkScopes } from "../auth.js";
+import { log } from "../logger.js";
+import { logMcpAction } from "../activity-log.js";
+import { prisma } from "../db.js";
 
 /**
  * Register the `read_note` tool on the MCP server.
@@ -14,14 +15,14 @@ import { prisma } from '../db.js';
  */
 export function register(server, auth) {
   server.tool(
-    'read_note',
-    'Read the full content of a note by slug',
+    "read_note",
+    "Read the full content of a note by slug",
     {
-      slug: z.string().min(1, 'slug is required'),
-      format: z.enum(['json', 'markdown']).optional().default('json'),
+      slug: z.string().min(1, "slug is required"),
+      format: z.enum(["json", "markdown"]).optional().default("json"),
     },
     async ({ slug, format }) => {
-      const scopeError = checkScopes(['agent:read'], auth.scopes);
+      const scopeError = checkScopes(["agent:read"], auth.scopes);
       if (scopeError) return scopeError;
 
       const start = performance.now();
@@ -32,9 +33,26 @@ export function register(server, auth) {
         });
 
         if (!note) {
-          log('info', 'tool.call', { tool: 'read_note', durationMs: performance.now() - start, success: true });
+          await logMcpAction(auth, {
+            action: "mcp:read_note",
+
+            status: "success",
+
+            details: { durationMs: performance.now() - start, success: true },
+          });
+
+          log("info", "tool.call", {
+            tool: "read_note",
+            durationMs: performance.now() - start,
+            success: true,
+          });
           return {
-            content: [{ type: 'text', text: JSON.stringify({ error: 'Note not found', slug }) }],
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({ error: "Note not found", slug }),
+              },
+            ],
             isError: true,
           };
         }
@@ -42,7 +60,7 @@ export function register(server, auth) {
         /** @type {string} */
         let result;
 
-        if (format === 'markdown') {
+        if (format === "markdown") {
           const fm = {
             title: note.title,
             status: note.status,
@@ -62,12 +80,50 @@ export function register(server, auth) {
           });
         }
 
-        log('info', 'tool.call', { tool: 'read_note', durationMs: performance.now() - start, success: true });
-        return { content: [{ type: 'text', text: result }] };
+        await logMcpAction(auth, {
+          action: "mcp:read_note",
+
+          status: "success",
+
+          details: { durationMs: performance.now() - start, success: true },
+        });
+
+        log("info", "tool.call", {
+          tool: "read_note",
+          durationMs: performance.now() - start,
+          success: true,
+        });
+        return { content: [{ type: "text", text: result }] };
       } catch (err) {
-        log('error', 'tool.call', { tool: 'read_note', durationMs: performance.now() - start, success: false, error: err.message });
+        await logMcpAction(auth, {
+          action: "mcp:read_note",
+
+          status: "error",
+
+          details: {
+            durationMs: performance.now() - start,
+            success: false,
+            error: err.message,
+          },
+        });
+
+        log("error", "tool.call", {
+          tool: "read_note",
+          durationMs: performance.now() - start,
+          success: false,
+          error: err.message,
+        });
         return {
-          content: [{ type: 'text', text: JSON.stringify({ error: 'Database error', message: err.message, isRetryable: true }) }],
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                error: "Database error",
+                message: err.message,
+                isRetryable: true,
+              }),
+            },
+          ],
           isError: true,
         };
       }

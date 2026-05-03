@@ -1,8 +1,9 @@
-import { z } from 'zod';
-import { Prisma } from '@prisma/client';
-import { checkScopes } from '../auth.js';
-import { log } from '../logger.js';
-import { prisma } from '../db.js';
+import { z } from "zod";
+import { Prisma } from "@prisma/client";
+import { checkScopes } from "../auth.js";
+import { log } from "../logger.js";
+import { logMcpAction } from "../activity-log.js";
+import { prisma } from "../db.js";
 
 /**
  * Register the `get_context` tool on the MCP server.
@@ -16,14 +17,19 @@ import { prisma } from '../db.js';
  */
 export function register(server, auth) {
   server.tool(
-    'get_context',
-    'Load relevant notes for a topic (or recent notes). Optimized for session-start context loading.',
+    "get_context",
+    "Load relevant notes for a topic (or recent notes). Optimized for session-start context loading.",
     {
-      topic: z.string().optional().describe('Topic to search for. If omitted, returns most recently updated notes.'),
+      topic: z
+        .string()
+        .optional()
+        .describe(
+          "Topic to search for. If omitted, returns most recently updated notes.",
+        ),
       limit: z.number().int().min(1).max(20).optional().default(10),
     },
     async ({ topic, limit }) => {
-      const scopeError = checkScopes(['agent:read'], auth.scopes);
+      const scopeError = checkScopes(["agent:read"], auth.scopes);
       if (scopeError) return scopeError;
 
       const start = performance.now();
@@ -45,14 +51,15 @@ export function register(server, auth) {
 
           // Fetch tags for the returned notes
           const noteIds = results.map((r) => r.id);
-          const tagRows = noteIds.length > 0
-            ? await prisma.$queryRaw`
+          const tagRows =
+            noteIds.length > 0
+              ? await prisma.$queryRaw`
                 SELECT nt."A" AS "noteId", t."name"
                 FROM "_NoteToTag" nt
                 INNER JOIN "Tag" t ON t."id" = nt."B"
                 WHERE nt."A" IN (${Prisma.join(noteIds)})
               `
-            : [];
+              : [];
 
           /** @type {Map<string, string[]>} */
           const tagMap = new Map();
@@ -68,14 +75,17 @@ export function register(server, auth) {
             title: r.title,
             excerpt: r.excerpt,
             tags: tagMap.get(r.id) ?? [],
-            updatedAt: r.updatedAt instanceof Date ? r.updatedAt.toISOString() : r.updatedAt,
+            updatedAt:
+              r.updatedAt instanceof Date
+                ? r.updatedAt.toISOString()
+                : r.updatedAt,
           }));
         } else {
           // Recent notes path
           const results = await prisma.note.findMany({
-            where: { userId: auth.userId, status: { not: 'ARCHIVED' } },
+            where: { userId: auth.userId, status: { not: "ARCHIVED" } },
             take: limit,
-            orderBy: { updatedAt: 'desc' },
+            orderBy: { updatedAt: "desc" },
             include: { tags: true },
           });
 
@@ -89,12 +99,50 @@ export function register(server, auth) {
           }));
         }
 
-        log('info', 'tool.call', { tool: 'get_context', durationMs: performance.now() - start, success: true });
-        return { content: [{ type: 'text', text: JSON.stringify(notes) }] };
+        await logMcpAction(auth, {
+          action: "mcp:get_context",
+
+          status: "success",
+
+          details: { durationMs: performance.now() - start, success: true },
+        });
+
+        log("info", "tool.call", {
+          tool: "get_context",
+          durationMs: performance.now() - start,
+          success: true,
+        });
+        return { content: [{ type: "text", text: JSON.stringify(notes) }] };
       } catch (err) {
-        log('error', 'tool.call', { tool: 'get_context', durationMs: performance.now() - start, success: false, error: err.message });
+        await logMcpAction(auth, {
+          action: "mcp:get_context",
+
+          status: "error",
+
+          details: {
+            durationMs: performance.now() - start,
+            success: false,
+            error: err.message,
+          },
+        });
+
+        log("error", "tool.call", {
+          tool: "get_context",
+          durationMs: performance.now() - start,
+          success: false,
+          error: err.message,
+        });
         return {
-          content: [{ type: 'text', text: JSON.stringify({ error: 'Database error', message: err.message, isRetryable: true }) }],
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                error: "Database error",
+                message: err.message,
+                isRetryable: true,
+              }),
+            },
+          ],
           isError: true,
         };
       }

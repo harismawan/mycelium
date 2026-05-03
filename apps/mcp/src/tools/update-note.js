@@ -1,9 +1,10 @@
-import { z } from 'zod';
-import { generateExcerpt, extractWikilinks, slugify } from '@mycelium/shared';
-import { checkScopes } from '../auth.js';
-import { log } from '../logger.js';
-import { prisma } from '../db.js';
-import { reconcileLinks, resolveUnresolvedLinks } from '../links.js';
+import { z } from "zod";
+import { generateExcerpt, extractWikilinks, slugify } from "@mycelium/shared";
+import { checkScopes } from "../auth.js";
+import { log } from "../logger.js";
+import { logMcpAction } from "../activity-log.js";
+import { prisma } from "../db.js";
+import { reconcileLinks, resolveUnresolvedLinks } from "../links.js";
 
 /**
  * Register the `update_note` tool on the MCP server.
@@ -17,18 +18,25 @@ import { reconcileLinks, resolveUnresolvedLinks } from '../links.js';
  */
 export function register(server, auth) {
   server.tool(
-    'update_note',
-    'Update an existing note by slug',
+    "update_note",
+    "Update an existing note by slug",
     {
-      slug: z.string().min(1, 'slug is required'),
+      slug: z.string().min(1, "slug is required"),
       title: z.string().optional(),
       content: z.string().optional(),
-      status: z.enum(['DRAFT', 'PUBLISHED', 'ARCHIVED']).optional(),
+      status: z.enum(["DRAFT", "PUBLISHED", "ARCHIVED"]).optional(),
       tags: z.array(z.string()).optional(),
       message: z.string().optional(),
     },
-    async ({ slug, title: newTitle, content: newContent, status: newStatus, tags, message }) => {
-      const scopeError = checkScopes(['notes:write'], auth.scopes);
+    async ({
+      slug,
+      title: newTitle,
+      content: newContent,
+      status: newStatus,
+      tags,
+      message,
+    }) => {
+      const scopeError = checkScopes(["notes:write"], auth.scopes);
       if (scopeError) return scopeError;
 
       const start = performance.now();
@@ -40,9 +48,26 @@ export function register(server, auth) {
         });
 
         if (!existing) {
-          log('info', 'tool.call', { tool: 'update_note', durationMs: performance.now() - start, success: true });
+          await logMcpAction(auth, {
+            action: "mcp:update_note",
+
+            status: "success",
+
+            details: { durationMs: performance.now() - start, success: true },
+          });
+
+          log("info", "tool.call", {
+            tool: "update_note",
+            durationMs: performance.now() - start,
+            success: true,
+          });
           return {
-            content: [{ type: 'text', text: JSON.stringify({ error: 'Note not found', slug }) }],
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({ error: "Note not found", slug }),
+              },
+            ],
             isError: true,
           };
         }
@@ -73,7 +98,13 @@ export function register(server, auth) {
         }
 
         /** @type {Record<string, unknown>} */
-        const updateData = { title, content, slug: updatedSlug, excerpt, status };
+        const updateData = {
+          title,
+          content,
+          slug: updatedSlug,
+          excerpt,
+          status,
+        };
 
         // Handle tags: disconnect all existing, then connect-or-create new ones
         if (tags !== undefined) {
@@ -93,7 +124,19 @@ export function register(server, auth) {
             where: { id: existing.id },
             data: {
               ...updateData,
-              ...(contentChanged ? { revisions: { create: { content, message, authType: 'apikey', apiKeyId: auth.apiKeyId, apiKeyName: auth.apiKeyName } } } : {}),
+              ...(contentChanged
+                ? {
+                    revisions: {
+                      create: {
+                        content,
+                        message,
+                        authType: "apikey",
+                        apiKeyId: auth.apiKeyId,
+                        apiKeyName: auth.apiKeyName,
+                      },
+                    },
+                  }
+                : {}),
             },
             include: { tags: true },
           });
@@ -112,12 +155,50 @@ export function register(server, auth) {
           tags: note.tags.map((t) => t.name),
         };
 
-        log('info', 'tool.call', { tool: 'update_note', durationMs: performance.now() - start, success: true });
-        return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+        await logMcpAction(auth, {
+          action: "mcp:update_note",
+
+          status: "success",
+
+          details: { durationMs: performance.now() - start, success: true },
+        });
+
+        log("info", "tool.call", {
+          tool: "update_note",
+          durationMs: performance.now() - start,
+          success: true,
+        });
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
       } catch (err) {
-        log('error', 'tool.call', { tool: 'update_note', durationMs: performance.now() - start, success: false, error: err.message });
+        await logMcpAction(auth, {
+          action: "mcp:update_note",
+
+          status: "error",
+
+          details: {
+            durationMs: performance.now() - start,
+            success: false,
+            error: err.message,
+          },
+        });
+
+        log("error", "tool.call", {
+          tool: "update_note",
+          durationMs: performance.now() - start,
+          success: false,
+          error: err.message,
+        });
         return {
-          content: [{ type: 'text', text: JSON.stringify({ error: 'Database error', message: err.message, isRetryable: true }) }],
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                error: "Database error",
+                message: err.message,
+                isRetryable: true,
+              }),
+            },
+          ],
           isError: true,
         };
       }

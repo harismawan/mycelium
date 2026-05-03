@@ -39,7 +39,7 @@ model Note {
   excerpt     String?
   status      NoteStatus @default(DRAFT)
   pinned      Boolean    @default(false)
-  searchVector Unsupported("tsvector")? @ignore
+  searchVector Unsupported("tsvector")?
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
   userId      String

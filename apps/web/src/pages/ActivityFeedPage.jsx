@@ -125,6 +125,21 @@ const ActionBadge = styled.span`
   font-family: monospace;
 `;
 
+const StatusBadge = styled.span`
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 999px;
+  text-transform: lowercase;
+  font-family: monospace;
+  background: ${({ $status }) => ($status === 'success'
+    ? 'color-mix(in srgb, var(--color-success) 18%, transparent)'
+    : 'color-mix(in srgb, var(--color-danger) 18%, transparent)')};
+  color: ${({ $status }) => ($status === 'success' ? 'var(--color-success)' : 'var(--color-danger)')};
+`;
+
 const KeyName = styled.span`
   font-size: 12px;
   font-weight: 500;
@@ -158,6 +173,40 @@ const DetailsSummary = styled.p`
   color: var(--color-text-secondary);
   margin: 0;
   line-height: 1.4;
+`;
+
+const MetaRow = styled.div`
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  flex-wrap: wrap;
+`;
+
+const MetaLabel = styled.span`
+  font-size: 11px;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+`;
+
+const MetaValue = styled.span`
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  font-family: monospace;
+`;
+
+const DetailsPre = styled.pre`
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg);
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  line-height: 1.45;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
 `;
 
 const EmptyState = styled.div`
@@ -241,6 +290,16 @@ function summarizeDetails(details) {
   if (details.query) parts.push(`Query: "${details.query}"`);
   if (details.revisionId) parts.push(`Revision: ${details.revisionId}`);
   return parts.length > 0 ? parts.join(' · ') : null;
+}
+
+/** Render details object as pretty JSON for audit visibility. */
+function formatDetailsJson(details) {
+  if (!details || typeof details !== 'object') return null;
+  try {
+    return JSON.stringify(details, null, 2);
+  } catch {
+    return String(details);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -349,6 +408,9 @@ export default function ActivityFeedPage() {
               <EntryCard key={entry.id}>
                 <EntryTopRow>
                   <ActionBadge>{entry.action}</ActionBadge>
+                  <StatusBadge $status={entry.status || 'success'}>
+                    {entry.status || 'success'}
+                  </StatusBadge>
                   <KeyName>{entry.apiKeyName}</KeyName>
                   <Timestamp dateTime={entry.createdAt}>
                     {formatTimestamp(entry.createdAt)}
@@ -364,10 +426,22 @@ export default function ActivityFeedPage() {
                   <ResourceSlug>{entry.targetResourceId}</ResourceSlug>
                 )}
 
+                {entry.targetResourceId && (
+                  <MetaRow>
+                    <MetaLabel>targetResourceId</MetaLabel>
+                    <MetaValue>{entry.targetResourceId}</MetaValue>
+                  </MetaRow>
+                )}
+
                 {summarizeDetails(entry.details) && (
-                  <DetailsSummary>
-                    {summarizeDetails(entry.details)}
-                  </DetailsSummary>
+                  <DetailsSummary>{summarizeDetails(entry.details)}</DetailsSummary>
+                )}
+
+                {formatDetailsJson(entry.details) && (
+                  <MetaRow style={{ display: 'block' }}>
+                    <MetaLabel>details</MetaLabel>
+                    <DetailsPre>{formatDetailsJson(entry.details)}</DetailsPre>
+                  </MetaRow>
                 )}
               </EntryCard>
             ))}

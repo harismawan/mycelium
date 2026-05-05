@@ -26,10 +26,3 @@ export {
   SCOPES,
 } from './constants.js';
 
-export {
-  getRedisClient,
-  prefixKey,
-  connectRedis,
-  disconnectRedis,
-  isRedisConnected,
-} from './redis.js';

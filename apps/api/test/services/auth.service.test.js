@@ -271,3 +271,66 @@ describe('AuthService.verifyApiKey', () => {
     expect(mockApiKey.update).not.toHaveBeenCalled();
   });
 });
+
+// ---------------------------------------------------------------------------
+// updateProfile
+// ---------------------------------------------------------------------------
+describe('AuthService.updateProfile', () => {
+  test('updates displayName and returns user without password', async () => {
+    const updated = { ...userWithoutPassword, displayName: 'New Name' };
+    mockUser.update = mock(() => Promise.resolve(updated));
+
+    const result = await AuthService.updateProfile('user_1', { displayName: 'New Name' });
+
+    expect(result).toEqual(updated);
+    expect(mockUser.update).toHaveBeenCalledWith({
+      where: { id: 'user_1' },
+      data: { displayName: 'New Name' },
+      select: { id: true, email: true, displayName: true, createdAt: true, updatedAt: true },
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// changePassword
+// ---------------------------------------------------------------------------
+describe('AuthService.changePassword', () => {
+  test('changes password when current password is correct', async () => {
+    mockUser.findUnique.mockResolvedValue(testUser);
+    mockUser.update = mock(() => Promise.resolve({}));
+
+    await AuthService.changePassword('user_1', 'secret123', 'newpass456');
+
+    expect(mockBcrypt.compare).toHaveBeenCalledWith('secret123', 'hashed_secret123');
+    expect(mockBcrypt.hash).toHaveBeenCalledWith('newpass456', 10);
+    expect(mockUser.update).toHaveBeenCalledWith({
+      where: { id: 'user_1' },
+      data: { password: 'hashed_newpass456' },
+    });
+  });
+
+  test('throws 404 when user not found', async () => {
+    mockUser.findUnique.mockResolvedValue(null);
+
+    try {
+      await AuthService.changePassword('user_missing', 'old', 'new');
+      expect(true).toBe(false);
+    } catch (err) {
+      expect(err.statusCode).toBe(404);
+      expect(err.message).toBe('User not found');
+    }
+  });
+
+  test('throws 401 when current password is incorrect', async () => {
+    mockUser.findUnique.mockResolvedValue(testUser);
+    mockBcrypt.compare.mockResolvedValue(false);
+
+    try {
+      await AuthService.changePassword('user_1', 'wrongpass', 'newpass');
+      expect(true).toBe(false);
+    } catch (err) {
+      expect(err.statusCode).toBe(401);
+      expect(err.message).toBe('Current password is incorrect');
+    }
+  });
+});

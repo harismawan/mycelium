@@ -1,5 +1,6 @@
 import Elysia from 'elysia';
 import { prisma } from '../db.js';
+import { StatusResponse, UnavailableResponse } from '../schemas/responses.js';
 
 /**
  * Health and readiness route group — root-level (no prefix).
@@ -13,6 +14,17 @@ import { prisma } from '../db.js';
 export const healthRoutes = new Elysia()
   .get('/health', () => {
     return { status: 'ok' };
+  }, {
+    response: {
+      200: StatusResponse,
+    },
+    detail: {
+      summary: 'Check service health',
+      description: 'Returns the current health status of the API service. Always responds 200 when the process is running. No authentication required.',
+      tags: ['Health'],
+      operationId: 'checkHealth',
+      security: [],
+    },
   })
 
   .get('/ready', async (/** @type {{ set: any }} */ ctx) => {
@@ -23,4 +35,16 @@ export const healthRoutes = new Elysia()
       ctx.set.status = 503;
       return { status: 'unavailable' };
     }
+  }, {
+    response: {
+      200: StatusResponse,
+      503: UnavailableResponse,
+    },
+    detail: {
+      summary: 'Check service readiness',
+      description: 'Returns 200 when the database is reachable, 503 otherwise. Used as a readiness probe for orchestrators. No authentication required.',
+      tags: ['Health'],
+      operationId: 'checkReadiness',
+      security: [],
+    },
   });

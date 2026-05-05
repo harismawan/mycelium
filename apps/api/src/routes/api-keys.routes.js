@@ -3,6 +3,7 @@ import Elysia, { t } from 'elysia';
 import { prisma } from '../db.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { csrfMiddleware } from '../middleware/csrf.js';
+import { ErrorResponse, MessageResponse, ApiKeyCreatedResponse, ApiKeyListResponse } from '../schemas/responses.js';
 
 /**
  * Generate a new API key with `myc_` prefix and its SHA-256 hash.
@@ -67,6 +68,17 @@ export const apiKeyRoutes = new Elysia({ prefix: '/api/v1/api-keys' })
         name: t.String({ minLength: 1 }),
         scopes: t.Optional(t.Array(t.String({ minLength: 1 }))),
       }),
+      response: {
+        201: ApiKeyCreatedResponse,
+        403: ErrorResponse,
+      },
+      detail: {
+        summary: 'Create a new API key',
+        description: 'Creates a new API key with the specified name and scopes. Returns the plaintext key (shown only once). Requires JWT cookie authentication only.',
+        tags: ['API Keys'],
+        operationId: 'createApiKey',
+        security: [{ cookieAuth: [] }],
+      },
     },
   )
 
@@ -87,6 +99,18 @@ export const apiKeyRoutes = new Elysia({ prefix: '/api/v1/api-keys' })
       });
 
       return { keys };
+    },
+    {
+      response: {
+        200: ApiKeyListResponse,
+      },
+      detail: {
+        summary: 'List all API keys',
+        description: 'Returns all API keys for the authenticated user without plaintext key values. Requires JWT cookie authentication only.',
+        tags: ['API Keys'],
+        operationId: 'listApiKeys',
+        security: [{ cookieAuth: [] }],
+      },
     },
   )
 
@@ -113,5 +137,16 @@ export const apiKeyRoutes = new Elysia({ prefix: '/api/v1/api-keys' })
       params: t.Object({
         id: t.String({ minLength: 1 }),
       }),
+      response: {
+        200: MessageResponse,
+        404: ErrorResponse,
+      },
+      detail: {
+        summary: 'Revoke an API key',
+        description: 'Permanently revokes (deletes) an API key. Returns 404 if the key does not exist or does not belong to the user. Requires JWT cookie authentication only.',
+        tags: ['API Keys'],
+        operationId: 'revokeApiKey',
+        security: [{ cookieAuth: [] }],
+      },
     },
   );

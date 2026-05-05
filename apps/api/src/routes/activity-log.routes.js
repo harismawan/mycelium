@@ -3,6 +3,7 @@ import { authMiddleware } from '../middleware/auth.js';
 import { csrfMiddleware } from '../middleware/csrf.js';
 import { rateLimiter } from '../middleware/rate-limiter.js';
 import { ActivityLogService } from '../services/activity-log.service.js';
+import { ActivityLogResponse } from '../schemas/responses.js';
 
 /**
  * Activity log route group — `/api/v1/activity-log`
@@ -37,5 +38,15 @@ export const activityLogRoutes = new Elysia({ prefix: '/api/v1/activity-log' })
         action: t.Optional(t.String()),
         apiKeyName: t.Optional(t.String()),
       }),
+      response: {
+        200: ActivityLogResponse,
+      },
+      detail: {
+        summary: 'List activity log entries',
+        description: 'Returns a paginated list of activity log entries for the authenticated user. Supports filtering by action type and API key name. Requires JWT cookie or Bearer API key authentication.',
+        tags: ['Activity Log'],
+        operationId: 'listActivityLog',
+        security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
+      },
     },
   );

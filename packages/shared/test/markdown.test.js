@@ -215,3 +215,80 @@ describe('renderToHtml', () => {
     expect(html).toContain('<code>');
   });
 });
+
+// ---------------------------------------------------------------------------
+// parseMarkdown (mdast)
+// ---------------------------------------------------------------------------
+import { parseMarkdown, serializeMarkdown } from '../markdown.js';
+
+describe('parseMarkdown', () => {
+  test('parses a simple paragraph into an mdast tree', () => {
+    const tree = parseMarkdown('Hello world');
+    expect(tree.type).toBe('root');
+    expect(tree.children.length).toBeGreaterThan(0);
+    expect(tree.children[0].type).toBe('paragraph');
+  });
+
+  test('parses headings correctly', () => {
+    const tree = parseMarkdown('# Title\n\n## Subtitle');
+    const headings = tree.children.filter((n) => n.type === 'heading');
+    expect(headings).toHaveLength(2);
+    expect(headings[0].depth).toBe(1);
+    expect(headings[1].depth).toBe(2);
+  });
+
+  test('parses frontmatter as a yaml node', () => {
+    const tree = parseMarkdown('---\ntitle: Test\n---\nBody');
+    const yamlNode = tree.children.find((n) => n.type === 'yaml');
+    expect(yamlNode).toBeDefined();
+    expect(yamlNode.value).toContain('title: Test');
+  });
+
+  test('parses code blocks', () => {
+    const tree = parseMarkdown('```js\nconst x = 1;\n```');
+    const code = tree.children.find((n) => n.type === 'code');
+    expect(code).toBeDefined();
+    expect(code.lang).toBe('js');
+    expect(code.value).toBe('const x = 1;');
+  });
+
+  test('parses lists', () => {
+    const tree = parseMarkdown('- item 1\n- item 2\n- item 3');
+    const list = tree.children.find((n) => n.type === 'list');
+    expect(list).toBeDefined();
+    expect(list.children).toHaveLength(3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// serializeMarkdown (mdast → string)
+// ---------------------------------------------------------------------------
+describe('serializeMarkdown', () => {
+  test('serializes a parsed tree back to markdown', () => {
+    const original = '# Hello\n\nWorld\n';
+    const tree = parseMarkdown(original);
+    const result = serializeMarkdown(tree);
+    expect(result).toContain('# Hello');
+    expect(result).toContain('World');
+  });
+
+  test('round-trip preserves structure', () => {
+    const original = '## Heading\n\nParagraph with **bold** text.\n\n- item 1\n- item 2\n';
+    const tree = parseMarkdown(original);
+    const result = serializeMarkdown(tree);
+    expect(result).toContain('## Heading');
+    expect(result).toContain('**bold**');
+    // remark-stringify may use * instead of - for list markers
+    expect(result).toMatch(/[*-] item 1/);
+    expect(result).toMatch(/[*-] item 2/);
+  });
+
+  test('preserves frontmatter in round-trip', () => {
+    const original = '---\ntitle: Test\n---\n\nBody content\n';
+    const tree = parseMarkdown(original);
+    const result = serializeMarkdown(tree);
+    expect(result).toContain('---');
+    expect(result).toContain('title: Test');
+    expect(result).toContain('Body content');
+  });
+});

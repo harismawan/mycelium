@@ -497,3 +497,122 @@ describe('NoteService.archiveNote', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// countNotes
+// ---------------------------------------------------------------------------
+describe('NoteService.countNotes', () => {
+  test('returns counts grouped by status', async () => {
+    // Mock prisma.note.count — need to add it to the mock
+    mockNote.count = mock(() => Promise.resolve(0));
+    mockNote.count
+      .mockResolvedValueOnce(10)  // total (non-archived)
+      .mockResolvedValueOnce(5)   // draft
+      .mockResolvedValueOnce(3)   // published
+      .mockResolvedValueOnce(2);  // archived
+
+    const result = await NoteService.countNotes(userId);
+
+    expect(result).toEqual({ total: 10, draft: 5, published: 3, archived: 2 });
+    expect(mockNote.count).toHaveBeenCalledTimes(4);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// deleteNote
+// ---------------------------------------------------------------------------
+describe('NoteService.deleteNote', () => {
+  test('deletes note and all associated links and revisions', async () => {
+    mockNote.findFirst.mockResolvedValue({ id: 'note_1' });
+    mockLink.deleteMany.mockResolvedValue({ count: 0 });
+    mockRevision.deleteMany = mock(() => Promise.resolve({ count: 0 }));
+    mockNote.delete = mock(() => Promise.resolve({}));
+
+    await NoteService.deleteNote(userId, 'my-note');
+
+    expect(mockNote.findFirst).toHaveBeenCalledWith({
+      where: { slug: 'my-note', userId },
+      select: { id: true },
+    });
+    // Links from this note deleted
+    expect(mockLink.deleteMany).toHaveBeenCalledWith({ where: { fromId: 'note_1' } });
+    // Links to this note deleted
+    expect(mockLink.deleteMany).toHaveBeenCalledWith({ where: { toId: 'note_1' } });
+    // Revisions deleted
+    expect(mockRevision.deleteMany).toHaveBeenCalledWith({ where: { noteId: 'note_1' } });
+    // Note deleted
+    expect(mockNote.delete).toHaveBeenCalledWith({ where: { id: 'note_1' } });
+  });
+
+  test('throws 404 for missing note', async () => {
+    mockNote.findFirst.mockResolvedValue(null);
+
+    try {
+      await NoteService.deleteNote(userId, 'nonexistent');
+      expect(true).toBe(false);
+    } catch (err) {
+      expect(err.statusCode).toBe(404);
+      expect(err.message).toBe('Note not found');
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// revertNote
+// ---------------------------------------------------------------------------
+describe('NoteService.revertNote', () => {
+  test('reverts note content to a specific revision', async () => {
+    mockNote.findFirst.mockResolvedValue({ id: 'note_1' });
+    mockRevision.findFirst = mock(() => Promise.resolve({
+      id: 'rev_old',
+      content: 'Old content',
+      noteId: 'note_1',
+    }));
+    mockNote.update.mockResolvedValue({
+      ...baseNote,
+      content: 'Old content',
+      revisions: [{ id: 'rev_new', content: 'Old content', message: 'Reverted to revision rev_old' }],
+    });
+
+    const result = await NoteService.revertNote(userId, 'my-note', 'rev_old', {
+      authType: 'apikey',
+      apiKeyId: 'key_1',
+      apiKeyName: 'test-key',
+    });
+
+    expect(mockTransaction).toHaveBeenCalledTimes(1);
+    expect(mockNote.update).toHaveBeenCalledTimes(1);
+
+    const updateArg = mockNote.update.mock.calls[0][0];
+    expect(updateArg.data.content).toBe('Old content');
+    expect(updateArg.data.revisions.create.message).toContain('rev_old');
+    expect(updateArg.data.revisions.create.authType).toBe('apikey');
+    expect(updateArg.data.revisions.create.apiKeyId).toBe('key_1');
+    expect(updateArg.data.revisions.create.apiKeyName).toBe('test-key');
+  });
+
+  test('throws 404 when note not found', async () => {
+    mockNote.findFirst.mockResolvedValue(null);
+
+    try {
+      await NoteService.revertNote(userId, 'missing', 'rev_1');
+      expect(true).toBe(false);
+    } catch (err) {
+      expect(err.statusCode).toBe(404);
+      expect(err.message).toBe('Note not found');
+    }
+  });
+
+  test('throws 404 when revision not found', async () => {
+    mockNote.findFirst.mockResolvedValue({ id: 'note_1' });
+    mockRevision.findFirst = mock(() => Promise.resolve(null));
+
+    try {
+      await NoteService.revertNote(userId, 'my-note', 'rev_missing');
+      expect(true).toBe(false);
+    } catch (err) {
+      expect(err.statusCode).toBe(404);
+      expect(err.message).toBe('Revision not found');
+    }
+  });
+});

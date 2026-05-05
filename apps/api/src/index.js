@@ -31,6 +31,11 @@ try {
  *
  * @type {Elysia}
  */
+// Conditional Swagger registration: disabled in production unless explicitly enabled
+const isProduction = process.env.NODE_ENV === 'production';
+const enableSwagger = process.env.ENABLE_SWAGGER === 'true';
+const shouldEnableSwagger = !isProduction || enableSwagger;
+
 const app = new Elysia()
   .use(
     cors({
@@ -40,21 +45,53 @@ const app = new Elysia()
       exposeHeaders: ['x-request-id'],
       methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
     }),
-  )
-  .use(
+  );
+
+if (shouldEnableSwagger) {
+  app.use(
     swagger({
       path: '/swagger',
       documentation: {
         info: {
           title: 'Mycelium API',
           version: '0.1.0',
-          description:
-            'Dual-audience knowledge base — REST API for humans and AI agents.',
+          description: 'Dual-audience knowledge base — REST API for a human SPA and AI agents. '
+            + 'Human users authenticate via JWT cookies; AI agents authenticate via Bearer API keys.',
+        },
+        tags: [
+          { name: 'Health', description: 'Liveness and readiness probes' },
+          { name: 'Auth', description: 'User registration, login, logout, and session management' },
+          { name: 'Notes', description: 'CRUD operations for knowledge base notes' },
+          { name: 'Tags', description: 'Tag listing and tag-based note filtering' },
+          { name: 'Graph', description: 'Knowledge graph and link traversal' },
+          { name: 'Agent', description: 'Machine-friendly endpoints for AI agent consumption' },
+          { name: 'API Keys', description: 'API key creation, listing, and revocation' },
+          { name: 'Activity Log', description: 'Audit log of API-key-authenticated actions' },
+        ],
+        servers: [
+          { url: 'http://localhost:3000', description: 'Local development' },
+        ],
+        components: {
+          securitySchemes: {
+            cookieAuth: {
+              type: 'apiKey',
+              in: 'cookie',
+              name: 'auth',
+              description: 'JWT access token set as an HttpOnly cookie after login.',
+            },
+            bearerApiKey: {
+              type: 'http',
+              scheme: 'bearer',
+              description: 'API key passed as a Bearer token in the Authorization header.',
+            },
+          },
         },
       },
     }),
-  )
-  .use(requestIdMiddleware);
+  );
+}
+
+app.use(requestIdMiddleware);
 
 // Apply logger directly on root app so hooks cover all routes
 applyLogger(app);

@@ -5,6 +5,7 @@ import { authMiddleware, AUTH_COOKIE_OPTIONS, REFRESH_COOKIE_OPTIONS, clearAuthC
 import { isRedisConnected } from '@mycelium/shared/redis';
 import { generateCsrfToken, CSRF_COOKIE_OPTIONS } from '../utils/csrf.js';
 import { csrfMiddleware } from '../middleware/csrf.js';
+import { ErrorResponse, UserResponse, LoginResponse, MessageResponse } from '../schemas/responses.js';
 
 /**
  * Auth route group — `/api/v1/auth`
@@ -39,6 +40,18 @@ export const authRoutes = new Elysia({ prefix: '/api/v1/auth' })
         password: t.String({ minLength: 8 }),
         displayName: t.String({ minLength: 1 }),
       }),
+      response: {
+        201: UserResponse,
+        400: ErrorResponse,
+        409: ErrorResponse,
+      },
+      detail: {
+        summary: 'Register a new user',
+        description: 'Creates a new user account with email and password. Returns the created user object. No authentication required.',
+        tags: ['Auth'],
+        operationId: 'registerUser',
+        security: [],
+      },
     },
   )
 
@@ -92,6 +105,18 @@ export const authRoutes = new Elysia({ prefix: '/api/v1/auth' })
         email: t.String({ format: 'email' }),
         password: t.String({ minLength: 1 }),
       }),
+      response: {
+        200: LoginResponse,
+        401: ErrorResponse,
+        503: ErrorResponse,
+      },
+      detail: {
+        summary: 'Log in a user',
+        description: 'Authenticates a user with email and password. Creates a server-side session, sets JWT access and refresh cookies, and returns the user object with an access token. No authentication required.',
+        tags: ['Auth'],
+        operationId: 'loginUser',
+        security: [],
+      },
     },
   )
 
@@ -142,6 +167,22 @@ export const authRoutes = new Elysia({ prefix: '/api/v1/auth' })
         return { error: 'Service temporarily unavailable' };
       }
     },
+    {
+      response: {
+        200: t.Object({
+          token: t.String({ description: 'New JWT access token' }),
+        }),
+        401: ErrorResponse,
+        503: ErrorResponse,
+      },
+      detail: {
+        summary: 'Refresh access token',
+        description: 'Issues a new access token using the refresh token cookie. Requires a valid refresh cookie. No Bearer or cookie auth header required.',
+        tags: ['Auth'],
+        operationId: 'refreshToken',
+        security: [],
+      },
+    },
   )
 
   // ── Protected routes ───────────────────────────────────────────
@@ -184,10 +225,33 @@ export const authRoutes = new Elysia({ prefix: '/api/v1/auth' })
     });
 
     return { message: 'Logged out' };
+  }, {
+    response: {
+      200: MessageResponse,
+    },
+    detail: {
+      summary: 'Log out the current user',
+      description: 'Revokes the current session and clears auth cookies. Requires JWT cookie or Bearer API key authentication.',
+      tags: ['Auth'],
+      operationId: 'logoutUser',
+      security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
+    },
   })
 
   .get('/me', (/** @type {{ user: any }} */ ctx) => {
     return ctx.user;
+  }, {
+    response: {
+      200: UserResponse,
+      401: ErrorResponse,
+    },
+    detail: {
+      summary: 'Get current user profile',
+      description: 'Returns the authenticated user\'s profile information. Requires JWT cookie or Bearer API key authentication.',
+      tags: ['Auth'],
+      operationId: 'getCurrentUser',
+      security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
+    },
   })
 
   .patch(
@@ -208,6 +272,20 @@ export const authRoutes = new Elysia({ prefix: '/api/v1/auth' })
       body: t.Object({
         displayName: t.Optional(t.String({ minLength: 1 })),
       }),
+      response: {
+        200: t.Object({
+          user: UserResponse,
+        }),
+        400: ErrorResponse,
+        401: ErrorResponse,
+      },
+      detail: {
+        summary: 'Update current user profile',
+        description: 'Updates the authenticated user\'s profile fields (e.g., display name). Requires JWT cookie or Bearer API key authentication.',
+        tags: ['Auth'],
+        operationId: 'updateCurrentUser',
+        security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
+      },
     },
   )
 
@@ -230,5 +308,17 @@ export const authRoutes = new Elysia({ prefix: '/api/v1/auth' })
         currentPassword: t.String({ minLength: 1 }),
         newPassword: t.String({ minLength: 8 }),
       }),
+      response: {
+        200: MessageResponse,
+        400: ErrorResponse,
+        401: ErrorResponse,
+      },
+      detail: {
+        summary: 'Change user password',
+        description: 'Changes the authenticated user\'s password. Requires the current password for verification. Requires JWT cookie or Bearer API key authentication.',
+        tags: ['Auth'],
+        operationId: 'changePassword',
+        security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
+      },
     },
   );

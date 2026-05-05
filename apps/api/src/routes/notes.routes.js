@@ -7,6 +7,16 @@ import { NoteService } from '../services/note.service.js';
 import { LinkService } from '../services/link.service.js';
 import { RevisionService } from '../services/revision.service.js';
 import { ActivityLogService } from '../services/activity-log.service.js';
+import {
+  ErrorResponse,
+  MessageResponse,
+  NoteResponse,
+  PaginatedNotesResponse,
+  NoteCountResponse,
+  RevisionResponse,
+  RevisionListResponse,
+  BacklinksResponse,
+} from '../schemas/responses.js';
 
 /**
  * Note route group — `/api/v1/notes`
@@ -69,6 +79,18 @@ export const noteRoutes = new Elysia({ prefix: '/api/v1/notes' })
         ),
         tags: t.Optional(t.Array(t.String({ minLength: 1 }))),
       }),
+      response: {
+        201: NoteResponse,
+        400: ErrorResponse,
+        401: ErrorResponse,
+      },
+      detail: {
+        summary: 'Create a new note',
+        description: 'Creates a new note with the given title, content, status, and tags. Requires JWT cookie or Bearer API key authentication.',
+        tags: ['Notes'],
+        operationId: 'createNote',
+        security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
+      },
     },
   )
 
@@ -77,6 +99,18 @@ export const noteRoutes = new Elysia({ prefix: '/api/v1/notes' })
     '/count',
     async (/** @type {{ user: { id: string } }} */ ctx) => {
       return NoteService.countNotes(ctx.user.id);
+    },
+    {
+      response: {
+        200: NoteCountResponse,
+      },
+      detail: {
+        summary: 'Get note counts by status',
+        description: 'Returns the number of draft, published, and archived notes for the authenticated user. Requires JWT cookie or Bearer API key authentication.',
+        tags: ['Notes'],
+        operationId: 'countNotes',
+        security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
+      },
     },
   )
 
@@ -108,6 +142,17 @@ export const noteRoutes = new Elysia({ prefix: '/api/v1/notes' })
         tag: t.Optional(t.String()),
         q: t.Optional(t.String()),
       }),
+      response: {
+        200: PaginatedNotesResponse,
+        401: ErrorResponse,
+      },
+      detail: {
+        summary: 'List notes with filters and pagination',
+        description: 'Returns a paginated list of notes for the authenticated user. Supports filtering by status, tag, and full-text search. Requires JWT cookie or Bearer API key authentication.',
+        tags: ['Notes'],
+        operationId: 'listNotes',
+        security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
+      },
     },
   )
 
@@ -143,6 +188,17 @@ export const noteRoutes = new Elysia({ prefix: '/api/v1/notes' })
       query: t.Object({
         format: t.Optional(t.String()),
       }),
+      response: {
+        200: NoteResponse,
+        404: ErrorResponse,
+      },
+      detail: {
+        summary: 'Get a note by slug',
+        description: 'Retrieves a single note by its slug. Supports ?format=md for raw Markdown output. Returns 404 if the note does not exist. Requires JWT cookie or Bearer API key authentication.',
+        tags: ['Notes'],
+        operationId: 'getNote',
+        security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
+      },
     },
   )
 
@@ -197,6 +253,18 @@ export const noteRoutes = new Elysia({ prefix: '/api/v1/notes' })
         tags: t.Optional(t.Array(t.String({ minLength: 1 }))),
         message: t.Optional(t.String()),
       }),
+      response: {
+        200: NoteResponse,
+        400: ErrorResponse,
+        404: ErrorResponse,
+      },
+      detail: {
+        summary: 'Update a note',
+        description: 'Partially updates a note by slug. Supports updating title, content, status, tags, and revision message. Creates a revision on content changes. Requires JWT cookie or Bearer API key authentication.',
+        tags: ['Notes'],
+        operationId: 'updateNote',
+        security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
+      },
     },
   )
 
@@ -233,6 +301,17 @@ export const noteRoutes = new Elysia({ prefix: '/api/v1/notes' })
       params: t.Object({
         slug: t.String({ minLength: 1 }),
       }),
+      response: {
+        200: MessageResponse,
+        404: ErrorResponse,
+      },
+      detail: {
+        summary: 'Archive a note',
+        description: 'Soft-deletes a note by setting its status to ARCHIVED. The note can be restored later. Returns 404 if the note does not exist. Requires JWT cookie or Bearer API key authentication.',
+        tags: ['Notes'],
+        operationId: 'archiveNote',
+        security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
+      },
     },
   )
 
@@ -269,6 +348,17 @@ export const noteRoutes = new Elysia({ prefix: '/api/v1/notes' })
       params: t.Object({
         slug: t.String({ minLength: 1 }),
       }),
+      response: {
+        200: MessageResponse,
+        404: ErrorResponse,
+      },
+      detail: {
+        summary: 'Permanently delete a note',
+        description: 'Permanently deletes a note and all its revisions. This action cannot be undone. Returns 404 if the note does not exist. Requires JWT cookie or Bearer API key authentication.',
+        tags: ['Notes'],
+        operationId: 'deleteNotePermanently',
+        security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
+      },
     },
   )
 
@@ -317,6 +407,17 @@ export const noteRoutes = new Elysia({ prefix: '/api/v1/notes' })
       body: t.Object({
         revisionId: t.String({ minLength: 1 }),
       }),
+      response: {
+        200: NoteResponse,
+        404: ErrorResponse,
+      },
+      detail: {
+        summary: 'Revert a note to a previous revision',
+        description: 'Reverts a note to the content of a specified revision. Creates a new revision recording the revert. Returns 404 if the note or revision does not exist. Requires JWT cookie or Bearer API key authentication.',
+        tags: ['Notes'],
+        operationId: 'revertNote',
+        security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
+      },
     },
   )
 
@@ -344,6 +445,17 @@ export const noteRoutes = new Elysia({ prefix: '/api/v1/notes' })
         cursor: t.Optional(t.String()),
         limit: t.Optional(t.String()),
       }),
+      response: {
+        200: RevisionListResponse,
+        404: ErrorResponse,
+      },
+      detail: {
+        summary: 'List revisions for a note',
+        description: 'Returns a paginated list of revisions for a note identified by slug. Returns 404 if the note does not exist. Requires JWT cookie or Bearer API key authentication.',
+        tags: ['Notes'],
+        operationId: 'listNoteRevisions',
+        security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
+      },
     },
   )
 
@@ -371,6 +483,17 @@ export const noteRoutes = new Elysia({ prefix: '/api/v1/notes' })
         slug: t.String({ minLength: 1 }),
         revisionId: t.String({ minLength: 1 }),
       }),
+      response: {
+        200: RevisionResponse,
+        404: ErrorResponse,
+      },
+      detail: {
+        summary: 'Get a specific note revision',
+        description: 'Retrieves a single revision by ID for a note identified by slug. Returns 404 if the note or revision does not exist. Requires JWT cookie or Bearer API key authentication.',
+        tags: ['Notes'],
+        operationId: 'getNoteRevision',
+        security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
+      },
     },
   )
 
@@ -391,5 +514,16 @@ export const noteRoutes = new Elysia({ prefix: '/api/v1/notes' })
       params: t.Object({
         slug: t.String({ minLength: 1 }),
       }),
+      response: {
+        200: BacklinksResponse,
+        404: ErrorResponse,
+      },
+      detail: {
+        summary: 'Get backlinks for a note',
+        description: 'Returns all notes that contain wikilinks pointing to the specified note. Returns 404 if the target note does not exist. Requires JWT cookie or Bearer API key authentication.',
+        tags: ['Notes'],
+        operationId: 'getNoteBacklinks',
+        security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
+      },
     },
   );

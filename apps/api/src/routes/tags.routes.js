@@ -3,6 +3,7 @@ import { DEFAULT_PAGE_LIMIT } from '@mycelium/shared';
 import { authMiddleware } from '../middleware/auth.js';
 import { csrfMiddleware } from '../middleware/csrf.js';
 import { prisma } from '../db.js';
+import { ErrorResponse, TagListResponse, TagNotesResponse } from '../schemas/responses.js';
 
 /**
  * Tag route group — `/api/v1/tags`
@@ -51,6 +52,18 @@ export const tagRoutes = new Elysia({ prefix: '/api/v1/tags' })
         })),
       };
     },
+    {
+      response: {
+        200: TagListResponse,
+      },
+      detail: {
+        summary: 'List all tags',
+        description: 'Returns all tags with their note counts for the authenticated user. Requires JWT cookie or Bearer API key authentication.',
+        tags: ['Tags'],
+        operationId: 'listTags',
+        security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
+      },
+    },
   )
 
   // GET /:name/notes — paginated notes by tag
@@ -96,5 +109,16 @@ export const tagRoutes = new Elysia({ prefix: '/api/v1/tags' })
         cursor: t.Optional(t.String()),
         limit: t.Optional(t.String()),
       }),
+      response: {
+        200: TagNotesResponse,
+        404: ErrorResponse,
+      },
+      detail: {
+        summary: 'List notes by tag',
+        description: 'Returns a paginated list of notes with the specified tag. Requires JWT cookie or Bearer API key authentication.',
+        tags: ['Tags'],
+        operationId: 'listNotesByTag',
+        security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
+      },
     },
   );

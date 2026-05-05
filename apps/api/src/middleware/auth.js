@@ -2,7 +2,6 @@ import Elysia from 'elysia';
 import { AuthService } from '../services/auth.service.js';
 import { SessionService } from '../services/session.service.js';
 import { isRedisConnected } from '@mycelium/shared/redis';
-import { prisma } from '../db.js';
 
 /**
  * @typedef {Object} AuthContext
@@ -121,11 +120,8 @@ async function authenticateWithJwt(ctx, token) {
       return { error: 'Unauthorized', status: 401 };
     }
 
-    // Fetch user from database using the userId from the token
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { id: true, email: true, displayName: true, createdAt: true, updatedAt: true },
-    });
+    // Fetch user from database
+    const user = await AuthService.verifyJwt(token);
     if (!user) {
       return { error: 'Unauthorized', status: 401 };
     }
@@ -163,11 +159,8 @@ async function attemptRefresh(ctx, refreshToken, oldJti) {
       ctx.cookie.auth.set({ ...AUTH_COOKIE_OPTIONS, value: result.accessToken });
     }
 
-    // Fetch user from database using the userId from the refresh result
-    const user = await prisma.user.findUnique({
-      where: { id: result.userId },
-      select: { id: true, email: true, displayName: true, createdAt: true, updatedAt: true },
-    });
+    // Fetch user using the new access token
+    const user = await AuthService.verifyJwt(result.accessToken);
     if (!user) {
       return { error: 'Unauthorized', status: 401 };
     }

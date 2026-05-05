@@ -1,5 +1,18 @@
 import { describe, test, expect, beforeEach, afterEach, mock } from 'bun:test';
-import { apiGet, apiPost, apiPatch, apiDelete } from '../../src/api/client.js';
+
+// Mock crypto.randomUUID before importing the client
+const MOCK_REQUEST_ID = '00000000-0000-0000-0000-000000000001';
+globalThis.crypto = /** @type {any} */ ({
+  ...globalThis.crypto,
+  randomUUID: () => MOCK_REQUEST_ID,
+});
+
+// Mock document.cookie for CSRF token reading
+globalThis.document = /** @type {any} */ ({
+  cookie: 'csrf=test-csrf-token',
+});
+
+const { apiGet, apiPost, apiPatch, apiDelete } = await import('../../src/api/client.js');
 
 /** @type {ReturnType<typeof mock>} */
 let fetchMock;
@@ -7,6 +20,8 @@ let fetchMock;
 beforeEach(() => {
   fetchMock = mock();
   globalThis.fetch = /** @type {any} */ (fetchMock);
+  // Reset document.cookie to include CSRF token
+  /** @type {any} */ (globalThis.document).cookie = 'csrf=test-csrf-token';
 });
 
 afterEach(() => {
@@ -38,7 +53,10 @@ describe('apiGet', () => {
 
     const result = await apiGet('/notes');
 
-    expect(fetchMock).toHaveBeenCalledWith('/api/v1/notes', { credentials: 'include' });
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/notes', {
+      headers: { 'x-request-id': MOCK_REQUEST_ID },
+      credentials: 'include',
+    });
     expect(result).toEqual({ id: '1' });
   });
 
@@ -64,6 +82,18 @@ describe('apiGet', () => {
   });
 });
 
+describe('apiGet — no CSRF header', () => {
+  test('GET requests do not include x-csrf-token header', async () => {
+    fetchMock.mockResolvedValue(mockResponse(200, { id: '1' }));
+
+    await apiGet('/notes');
+
+    const callArgs = fetchMock.mock.calls[0];
+    const headers = callArgs[1].headers;
+    expect(headers['x-csrf-token']).toBeUndefined();
+  });
+});
+
 describe('apiPost', () => {
   test('sends POST with JSON body and credentials', async () => {
     const body = { title: 'Test', content: '# Test' };
@@ -73,7 +103,11 @@ describe('apiPost', () => {
 
     expect(fetchMock).toHaveBeenCalledWith('/api/v1/notes', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-request-id': MOCK_REQUEST_ID,
+        'x-csrf-token': 'test-csrf-token',
+      },
       credentials: 'include',
       body: JSON.stringify(body),
     });
@@ -101,7 +135,11 @@ describe('apiPatch', () => {
 
     expect(fetchMock).toHaveBeenCalledWith('/api/v1/notes/test', {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-request-id': MOCK_REQUEST_ID,
+        'x-csrf-token': 'test-csrf-token',
+      },
       credentials: 'include',
       body: JSON.stringify(body),
     });
@@ -117,6 +155,10 @@ describe('apiDelete', () => {
 
     expect(fetchMock).toHaveBeenCalledWith('/api/v1/notes/test', {
       method: 'DELETE',
+      headers: {
+        'x-request-id': MOCK_REQUEST_ID,
+        'x-csrf-token': 'test-csrf-token',
+      },
       credentials: 'include',
     });
     expect(result.message).toBe('Note archived');

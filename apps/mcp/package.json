@@ -6,7 +6,7 @@
   "scripts": {
     "start": "bun src/index.js",
     "start:http": "MCP_TRANSPORT=http bun src/index.js",
-    "test": "bun test"
+    "test": "bun test --isolate"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1",

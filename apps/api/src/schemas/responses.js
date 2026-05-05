@@ -29,14 +29,14 @@ export const UserResponse = t.Object({
   id: t.String({ description: 'User ID' }),
   email: t.String({ format: 'email', description: 'User email address' }),
   displayName: t.String({ description: 'User display name' }),
-  createdAt: t.String({ format: 'date-time', description: 'Account creation timestamp' }),
-  updatedAt: t.String({ format: 'date-time', description: 'Last profile update timestamp' }),
+  createdAt: t.Date({ description: 'Account creation timestamp' }),
+  updatedAt: t.Date({ description: 'Last profile update timestamp' }),
 });
 
 /** Login response with user object and access token */
 export const LoginResponse = t.Object({
   user: UserResponse,
-  accessToken: t.String({ description: 'JWT access token' }),
+  token: t.String({ description: 'JWT access token' }),
 });
 
 // ─── Note Responses ──────────────────────────────────────────────────────────

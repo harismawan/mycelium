@@ -89,7 +89,7 @@ export const authRoutes = new Elysia({ prefix: '/api/v1/auth' })
           value: generateCsrfToken(),
         });
 
-        return { user, accessToken: tokens.accessToken };
+        return { user, token: tokens.accessToken };
       } catch (err) {
         if (err && typeof err === 'object' && 'statusCode' in err) {
           ctx.set.status = /** @type {any} */ (err).statusCode;

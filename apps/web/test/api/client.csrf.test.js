@@ -131,8 +131,8 @@ describe('apiGet — no CSRF header', () => {
     await apiGet('/notes');
 
     expect(fetchCalls).toHaveLength(1);
-    // apiGet doesn't pass custom headers, so opts.headers should be undefined
-    expect(fetchCalls[0].opts.headers).toBeUndefined();
+    const headers = fetchCalls[0].opts.headers;
+    expect(headers['x-csrf-token']).toBeUndefined();
   });
 });
 

@@ -1,4 +1,5 @@
 import {
+  parseFrontmatter,
   serializeFrontmatter,
   extractWikilinks,
   generateExcerpt,
@@ -25,6 +26,7 @@ export const NoteService = {
    */
   async createNote(userId, data) {
     const { title, content, status, tags, authType, apiKeyId, apiKeyName } = data;
+    const { frontmatter } = parseFrontmatter(content);
     const excerpt = generateExcerpt(content);
     const wikilinks = extractWikilinks(content);
 
@@ -55,6 +57,7 @@ export const NoteService = {
           content,
           slug,
           excerpt,
+          frontmatter: Object.keys(frontmatter).length > 0 ? frontmatter : undefined,
           status: status ?? 'DRAFT',
           userId,
           tags: tagOps.length ? { connectOrCreate: tagOps } : undefined,
@@ -171,14 +174,12 @@ export const NoteService = {
   async getNoteMarkdown(userId, slug) {
     const note = await prisma.note.findFirst({
       where: { slug, userId },
-      select: { title: true, content: true, status: true, tags: { select: { name: true } } },
+      select: { content: true },
     });
     if (!note) {
       throw { statusCode: 404, message: 'Note not found' };
     }
-    // Generate frontmatter on-the-fly for export
-    const fm = { title: note.title, status: note.status, tags: note.tags.map((t) => t.name) };
-    return serializeFrontmatter(fm, note.content);
+    return note.content;
   },
 
   /**
@@ -208,6 +209,7 @@ export const NoteService = {
 
     const excerpt = generateExcerpt(content);
     const wikilinks = extractWikilinks(content);
+    const { frontmatter } = parseFrontmatter(content);
 
     // Re-generate slug if title changed
     let newSlug = existing.slug;
@@ -233,6 +235,7 @@ export const NoteService = {
       content,
       slug: newSlug,
       excerpt,
+      frontmatter: Object.keys(frontmatter).length > 0 ? frontmatter : undefined,
       status,
     };
 

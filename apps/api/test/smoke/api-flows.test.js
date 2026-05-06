@@ -158,20 +158,23 @@ describe('Smoke: Auth flow (register → login → verify JWT)', () => {
     expect(mockBcrypt.hash).toHaveBeenCalledWith('password123', 10);
   });
 
-  test('login with same credentials returns JWT token', async () => {
+  test('login with same credentials returns user (token issued by SessionService)', async () => {
     const storedUser = { ...registeredUser, password: 'hashed_password123' };
     mockUser.findUnique.mockResolvedValue(storedUser);
 
     const result = await AuthService.login('smoke@example.com', 'password123');
 
-    expect(result.token).toBe(`token_${userId}`);
+    // AuthService.login no longer issues a token — SessionService.createSession does.
     expect(result.user.id).toBe(userId);
     expect(result.user).not.toHaveProperty('password');
+    expect(result).not.toHaveProperty('token');
   });
 
   test('verifyJwt with issued token returns the user', async () => {
     mockUser.findUnique.mockResolvedValue(registeredUser);
-
+    // AuthService.verifyJwt delegates to SessionService.verifyToken.
+    // The mockJwt.verify stub covers that path since SessionService is imported
+    // after the mock.module('jsonwebtoken') registration.
     const user = await AuthService.verifyJwt(`token_${userId}`);
 
     expect(user).not.toBeNull();

@@ -376,11 +376,14 @@ export const NoteService = {
       throw { statusCode: 404, message: 'Note not found' };
     }
 
-    // Delete links, revisions, then the note (cascade handles most, but be explicit)
-    await prisma.link.deleteMany({ where: { fromId: note.id } });
-    await prisma.link.deleteMany({ where: { toId: note.id } });
-    await prisma.revision.deleteMany({ where: { noteId: note.id } });
-    await prisma.note.delete({ where: { id: note.id } });
+    // Delete links, revisions, and the note inside a single transaction to
+    // prevent orphaned records if the process crashes mid-delete.
+    await prisma.$transaction([
+      prisma.link.deleteMany({ where: { fromId: note.id } }),
+      prisma.link.deleteMany({ where: { toId: note.id } }),
+      prisma.revision.deleteMany({ where: { noteId: note.id } }),
+      prisma.note.delete({ where: { id: note.id } }),
+    ]);
   },
 };
 

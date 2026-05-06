@@ -79,6 +79,16 @@ const mockRedisClient = {
     return 1;
   },
   ttl: async (key) => ttls.get(key) ?? -1,
+  /** Minimal SCAN — returns all matching keys in one pass. */
+  scan: async (cursor, ...args) => {
+    let pattern = '*';
+    for (let i = 0; i < args.length - 1; i++) {
+      if (args[i].toUpperCase() === 'MATCH') { pattern = args[i + 1]; break; }
+    }
+    const regex = new RegExp('^' + pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.') + '$');
+    const allKeys = new Set([...store.keys(), ...hashes.keys(), ...sets.keys()]);
+    return ['0', [...allKeys].filter((k) => regex.test(k))];
+  },
 };
 
 // ---------------------------------------------------------------------------

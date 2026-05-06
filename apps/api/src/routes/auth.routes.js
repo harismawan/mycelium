@@ -291,10 +291,19 @@ export const authRoutes = new Elysia({ prefix: '/api/v1/auth' })
 
   .post(
     '/change-password',
-    async (/** @type {{ body: { currentPassword: string, newPassword: string }, user: { id: string }, set: any }} */ ctx) => {
+    async (/** @type {{ body: { currentPassword: string, newPassword: string }, user: { id: string }, cookie: Record<string, any>, set: any }} */ ctx) => {
       try {
-        await AuthService.changePassword(ctx.user.id, ctx.body.currentPassword, ctx.body.newPassword);
-        return { message: 'Password changed' };
+        // Extract the caller's session ID so it can be preserved during bulk revocation.
+        // This keeps the user logged in on the current device while signing out all others.
+        const authCookie = ctx.cookie?.auth;
+        const accessToken = authCookie?.value ?? authCookie?.toString?.() ?? null;
+        const decoded = (accessToken && accessToken !== 'undefined' && accessToken !== '')
+          ? SessionService.decodeToken(String(accessToken))
+          : null;
+        const currentSessionId = decoded?.sid ?? undefined;
+
+        await AuthService.changePassword(ctx.user.id, ctx.body.currentPassword, ctx.body.newPassword, currentSessionId);
+        return { message: 'Password changed. All other sessions have been signed out.' };
       } catch (err) {
         if (err && typeof err === 'object' && 'statusCode' in err) {
           ctx.set.status = /** @type {any} */ (err).statusCode;

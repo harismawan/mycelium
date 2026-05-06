@@ -1,9 +1,8 @@
 import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
 import { createHash } from 'crypto';
 import { prisma } from '../db.js';
+import { SessionService } from './session.service.js';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'mycelium-dev-secret-change-in-production';
 const SALT_ROUNDS = 10;
 
 /**
@@ -62,10 +61,8 @@ export const AuthService = {
       throw { statusCode: 401, message: 'Invalid credentials' };
     }
 
-    const token = jwt.sign({ sub: user.id, email: user.email }, JWT_SECRET, {
-      expiresIn: '7d',
-    });
-
+    // Token issuance is handled by SessionService.createSession() in the login route.
+    // Return only the user — no redundant JWT signing here.
     return {
       user: {
         id: user.id,
@@ -74,18 +71,19 @@ export const AuthService = {
         createdAt: user.createdAt,
         updatedAt: user.updatedAt,
       },
-      token,
     };
   },
 
   /**
    * Verify a JWT token and return the associated user.
+   * Delegates signature verification to SessionService to avoid duplicating the JWT_SECRET.
    * @param {string} token - The JWT token string.
    * @returns {Promise<{id: string, email: string, displayName: string, createdAt: Date, updatedAt: Date} | null>}
    */
   async verifyJwt(token) {
     try {
-      const payload = jwt.verify(token, JWT_SECRET);
+      const payload = SessionService.verifyToken(token);
+      if (!payload?.sub) return null;
       const user = await prisma.user.findUnique({
         where: { id: payload.sub },
         select: { id: true, email: true, displayName: true, createdAt: true, updatedAt: true },
@@ -118,11 +116,12 @@ export const AuthService = {
       return null;
     }
 
-    // Update lastUsedAt timestamp
-    await prisma.apiKey.update({
+    // Update lastUsedAt timestamp — fire-and-forget so a DB hiccup doesn't
+    // block or fail an otherwise valid authenticated request.
+    prisma.apiKey.update({
       where: { id: apiKey.id },
       data: { lastUsedAt: new Date() },
-    });
+    }).catch(() => {});
 
     return { user: apiKey.user, scopes: apiKey.scopes, apiKeyId: apiKey.id, apiKeyName: apiKey.name };
   },
@@ -149,7 +148,18 @@ export const AuthService = {
    * @param {string} currentPassword
    * @param {string} newPassword
    */
-  async changePassword(userId, currentPassword, newPassword) {
+  /**
+   * Change user password and revoke ALL existing sessions.
+   *
+   * After a password change, any previously stolen session cookie or refresh
+   * token is immediately invalidated, preventing session hijacking.
+   *
+   * @param {string} userId
+   * @param {string} currentPassword
+   * @param {string} newPassword
+   * @param {string} [currentSessionId] - The caller's own session ID to preserve (optional).
+   */
+  async changePassword(userId, currentPassword, newPassword, currentSessionId) {
     const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw { statusCode: 404, message: 'User not found' };
 
@@ -158,5 +168,13 @@ export const AuthService = {
 
     const hashed = await bcrypt.hash(newPassword, SALT_ROUNDS);
     await prisma.user.update({ where: { id: userId }, data: { password: hashed } });
+
+    // Revoke all sessions for this user so stolen tokens are immediately invalid.
+    // Best-effort — if Redis is unavailable the password is still changed.
+    try {
+      await SessionService.revokeAllUserSessions(userId, currentSessionId);
+    } catch {
+      // Log but don't fail the password change itself.
+    }
   },
 };

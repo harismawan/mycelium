@@ -256,6 +256,59 @@ export const SessionService = {
   },
 
   /**
+   * Revoke all active sessions for a user across all devices.
+   *
+   * Used after a password change to ensure any stolen session tokens are
+   * immediately invalidated. Scans the Redis keyspace for this user's sessions
+   * by looking them up from their known session IDs stored in the jti mappings,
+   * then delegates to revokeSession() for each.
+   *
+   * Implementation: scans for all `jti:*` keys, checks the userId in their
+   * values, and derives the session IDs to revoke.
+   *
+   * @param {string} userId - The user whose sessions to revoke.
+   * @param {string} [preserveSessionId] - Optional session ID to preserve (the caller's own session).
+   * @returns {Promise<void>}
+   */
+  async revokeAllUserSessions(userId, preserveSessionId) {
+    const redis = getRedisClient();
+
+    // Scan for all session keys belonging to this user.
+    // Sessions are stored as hash keys: `mycelium:session:<sessionId>`
+    // We scan those and check the stored userId field.
+    const sessionPrefix = prefixKey('session:');
+    const sessionIds = new Set();
+
+    let cursor = '0';
+    do {
+      const result = await redis.scan(cursor, 'MATCH', `${sessionPrefix}*`, 'COUNT', 100);
+      cursor = result[0];
+      const keys = result[1];
+
+      for (const key of keys) {
+        // Skip jti-set keys (they end with `:jtis`)
+        if (key.endsWith(':jtis')) continue;
+
+        const data = await redis.hgetall(key);
+        if (data?.userId === userId) {
+          // Extract sessionId from key: strip prefix
+          const sessionId = key.slice(sessionPrefix.length);
+          sessionIds.add(sessionId);
+        }
+      }
+    } while (cursor !== '0');
+
+    // Revoke each session, skipping the preserved one if provided
+    const revocations = [];
+    for (const sessionId of sessionIds) {
+      if (preserveSessionId && sessionId === preserveSessionId) continue;
+      revocations.push(this.revokeSession(sessionId));
+    }
+
+    await Promise.allSettled(revocations);
+  },
+
+  /**
    * Decode a JWT without verification (for extracting claims from expired tokens).
    *
    * @param {string} token

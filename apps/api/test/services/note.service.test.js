@@ -22,13 +22,18 @@ const mockRevision = {
   create: mock(() => ({})),
 };
 
-/** Tracks the callback passed to $transaction so we can inspect calls */
-const mockTransaction = mock(async (cb) => cb({
-  note: mockNote,
-  link: mockLink,
-  tag: mockTag,
-  revision: mockRevision,
-}));
+/** Tracks the callback/array passed to $transaction so we can inspect calls */
+const mockTransaction = mock(async (arg) => {
+  if (Array.isArray(arg)) {
+    return Promise.all(arg);
+  }
+  return arg({
+    note: mockNote,
+    link: mockLink,
+    tag: mockTag,
+    revision: mockRevision,
+  });
+});
 
 mock.module('@prisma/client', () => ({
   PrismaClient: class {
@@ -86,12 +91,17 @@ beforeEach(() => {
   mockTransaction.mockReset();
 
   // Restore default $transaction implementation
-  mockTransaction.mockImplementation(async (cb) => cb({
-    note: mockNote,
-    link: mockLink,
-    tag: mockTag,
-    revision: mockRevision,
-  }));
+  mockTransaction.mockImplementation(async (arg) => {
+    if (Array.isArray(arg)) {
+      return Promise.all(arg);
+    }
+    return arg({
+      note: mockNote,
+      link: mockLink,
+      tag: mockTag,
+      revision: mockRevision,
+    });
+  });
 
   // Default: no existing slugs
   mockNote.findMany.mockResolvedValue([]);

@@ -16,6 +16,35 @@ function resetStore() {
 }
 
 const mockRedisClient = {
+  // eval simulates the Lua rate-limit script: prune + count + conditionally add
+  eval: async (_script, _numkeys, key, windowStart, maxRequests, now, member, windowSeconds) => {
+    const set = sortedSets.get(key);
+    if (set) {
+      const ws = Number(windowStart);
+      for (const [m, score] of set.entries()) {
+        if (score <= ws) set.delete(m);
+      }
+    }
+
+    const currentSet = sortedSets.get(key);
+    const count = currentSet ? currentSet.size : 0;
+    const maxReqs = Number(maxRequests);
+
+    if (count >= maxReqs) {
+      const sorted = currentSet ? [...currentSet.entries()].sort((a, b) => a[1] - b[1]) : [];
+      const oldestMember = sorted.length > 0 ? sorted[0][0] : '';
+      return ['limited', count, oldestMember];
+    }
+
+    if (!sortedSets.has(key)) sortedSets.set(key, new Map());
+    sortedSets.get(key).set(member, Number(now));
+    ttls.set(key, Number(windowSeconds));
+
+    const finalSet = sortedSets.get(key);
+    const sorted = [...finalSet.entries()].sort((a, b) => a[1] - b[1]);
+    const oldestMember = sorted.length > 0 ? sorted[0][0] : '';
+    return ['ok', count, oldestMember];
+  },
   zadd: async (key, score, member) => {
     if (!sortedSets.has(key)) sortedSets.set(key, new Map());
     sortedSets.get(key).set(member, score);

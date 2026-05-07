@@ -13,6 +13,7 @@ const mockLink = {
   findMany: mock(() => []),
   deleteMany: mock(() => ({ count: 0 })),
   create: mock(() => ({})),
+  createMany: mock(() => ({ count: 0 })),
   updateMany: mock(() => ({ count: 0 })),
 };
 const mockTag = {
@@ -85,6 +86,7 @@ beforeEach(() => {
   mockLink.findMany.mockReset();
   mockLink.deleteMany.mockReset();
   mockLink.create.mockReset();
+  mockLink.createMany.mockReset();
   mockLink.updateMany.mockReset();
   mockTag.findMany.mockReset();
   mockRevision.create.mockReset();
@@ -183,32 +185,31 @@ describe('NoteService.createNote', () => {
   test('extracts wikilinks and creates link records via reconcileLinks', async () => {
     const content = 'See [[Other Note]] and [[Missing Note]]';
     mockNote.create.mockResolvedValue({ ...baseNote, id: 'note_new' });
-    // No existing slugs
-    mockNote.findMany.mockResolvedValue([]);
+    // First findMany: slug collision check (no collisions)
+    // Second findMany: batch target lookup — "Other Note" found, "Missing Note" not
+    mockNote.findMany
+      .mockResolvedValueOnce([])  // slug lookup
+      .mockResolvedValueOnce([{ id: 'note_other', title: 'Other Note' }]); // batch target lookup
     // No existing links
     mockLink.findMany.mockResolvedValue([]);
-    // First wikilink target found, second not found
-    mockNote.findFirst
-      .mockResolvedValueOnce({ id: 'note_other' })  // "Other Note" found
-      .mockResolvedValueOnce(null);                   // "Missing Note" not found
     mockLink.updateMany.mockResolvedValue({ count: 0 });
 
     await NoteService.createNote(userId, { title: 'My Note', content });
 
-    // Two link.create calls for the two wikilinks
-    expect(mockLink.create).toHaveBeenCalledTimes(2);
+    // Single createMany call with both links
+    expect(mockLink.createMany).toHaveBeenCalledTimes(1);
+    const { data } = mockLink.createMany.mock.calls[0][0];
+    expect(data).toHaveLength(2);
 
-    // First link: resolved
-    const link1 = mockLink.create.mock.calls[0][0];
-    expect(link1.data.fromId).toBe('note_new');
-    expect(link1.data.toId).toBe('note_other');
-    expect(link1.data.toTitle).toBeNull();
+    const resolved = data.find((l) => l.toId === 'note_other');
+    expect(resolved).toBeDefined();
+    expect(resolved.fromId).toBe('note_new');
+    expect(resolved.toTitle).toBeNull();
 
-    // Second link: unresolved (toId null, toTitle stored)
-    const link2 = mockLink.create.mock.calls[1][0];
-    expect(link2.data.fromId).toBe('note_new');
-    expect(link2.data.toId).toBeNull();
-    expect(link2.data.toTitle).toBe('Missing Note');
+    const unresolved = data.find((l) => l.toTitle === 'Missing Note');
+    expect(unresolved).toBeDefined();
+    expect(unresolved.fromId).toBe('note_new');
+    expect(unresolved.toId).toBeNull();
   });
 
   /** Validates: Requirements 2.4 */
@@ -461,15 +462,12 @@ describe('NoteService.updateNote', () => {
     mockNote.update.mockResolvedValue({ ...baseNote, content });
     // No existing links
     mockLink.findMany.mockResolvedValue([]);
-    // Target note found
-    mockNote.findFirst
-      .mockResolvedValueOnce(baseNote)       // findFirst for existing note lookup
-      .mockResolvedValueOnce({ id: 'note_target' }); // findFirst for wikilink target
+    mockNote.findFirst.mockResolvedValueOnce(baseNote); // findFirst for existing note lookup
 
     await NoteService.updateNote(userId, 'my-note', { content });
 
-    // link.create called for the wikilink
-    expect(mockLink.create).toHaveBeenCalled();
+    // createMany called for the wikilink (batch creation replaces per-link create)
+    expect(mockLink.createMany).toHaveBeenCalled();
   });
 });
 

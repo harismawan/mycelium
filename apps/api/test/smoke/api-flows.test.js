@@ -18,6 +18,7 @@ const mockLink = {
   findMany: mock(() => []),
   deleteMany: mock(() => ({ count: 0 })),
   create: mock(() => ({})),
+  createMany: mock(() => ({ count: 0 })),
   updateMany: mock(() => ({ count: 0 })),
 };
 const mockTag = {
@@ -262,26 +263,27 @@ describe('Smoke: Wikilink/backlink reconciliation flow', () => {
       id: 'note_src',
       content,
     });
-    mockNote.findMany.mockResolvedValue([]); // no slug collisions
+    // First call: slug collision check (no collisions)
+    // Second call: batch target lookup — "Target Note" found, "Missing Note" not
+    mockNote.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: 'note_target', title: 'Target Note' }]);
     mockLink.findMany.mockResolvedValue([]); // no existing links
-
-    // First wikilink target found, second not found
-    mockNote.findFirst
-      .mockResolvedValueOnce({ id: 'note_target' }) // "Target Note" resolved
-      .mockResolvedValueOnce(null);                   // "Missing Note" unresolved
 
     await NoteService.createNote(userId, { title: 'Source Note', content });
 
-    // Two link.create calls for the two wikilinks
-    expect(mockLink.create).toHaveBeenCalledTimes(2);
+    // Single createMany with both links (batch creation)
+    expect(mockLink.createMany).toHaveBeenCalledTimes(1);
+    const { data } = mockLink.createMany.mock.calls[0][0];
+    expect(data).toHaveLength(2);
 
-    const link1 = mockLink.create.mock.calls[0][0];
-    expect(link1.data.toId).toBe('note_target');
-    expect(link1.data.toTitle).toBeNull();
+    const resolved = data.find((l) => l.toId === 'note_target');
+    expect(resolved).toBeDefined();
+    expect(resolved.toTitle).toBeNull();
 
-    const link2 = mockLink.create.mock.calls[1][0];
-    expect(link2.data.toId).toBeNull();
-    expect(link2.data.toTitle).toBe('Missing Note');
+    const unresolved = data.find((l) => l.toTitle === 'Missing Note');
+    expect(unresolved).toBeDefined();
+    expect(unresolved.toId).toBeNull();
   });
 
   test('creating target note resolves unresolved links', async () => {

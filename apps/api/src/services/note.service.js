@@ -7,6 +7,7 @@ import {
   DEFAULT_PAGE_LIMIT,
 } from '@mycelium/shared';
 import { prisma } from '../db.js';
+import { LinkService } from './link.service.js';
 
 /**
  * Note service handling CRUD operations, the Markdown save pipeline,
@@ -74,7 +75,7 @@ export const NoteService = {
       });
 
       // Reconcile links inside the transaction
-      await reconcileLinks(tx, created.id, wikilinks, userId);
+      await LinkService.reconcileLinks(created.id, wikilinks, { tx, userId });
 
       // Resolve any unresolved links that match this note's title
       await resolveUnresolvedLinks(tx, created.id, title);
@@ -274,7 +275,7 @@ export const NoteService = {
       });
 
       // Reconcile links
-      await reconcileLinks(tx, updated.id, wikilinks, userId);
+      await LinkService.reconcileLinks(updated.id, wikilinks, { tx, userId });
 
       // Resolve unresolved links matching the (possibly new) title
       await resolveUnresolvedLinks(tx, updated.id, title);
@@ -386,101 +387,6 @@ export const NoteService = {
     ]);
   },
 };
-
-/**
- * Reconcile the Link table for a note after content changes.
- *
- * Diffs the current wikilinks in the content against existing Link records:
- * - Creates new Link records for newly added wikilinks
- * - Removes Link records for wikilinks no longer present
- *
- * For each wikilink, looks up the target note by title. If found, sets `toId`;
- * otherwise stores the unresolved title in `toTitle`.
- *
- * @param {import('@prisma/client').Prisma.TransactionClient} tx - Prisma transaction client.
- * @param {string} noteId - The source note ID.
- * @param {string[]} wikilinks - Deduplicated wikilink titles extracted from content.
- * @param {string} userId - The owning user ID (for scoping target lookups).
- */
-async function reconcileLinks(tx, noteId, wikilinks, userId) {
-  // Get existing outgoing links for this note
-  const existingLinks = await tx.link.findMany({
-    where: { fromId: noteId },
-    select: { id: true, toTitle: true, toId: true },
-  });
-
-  // Build a map of existing link targets (by resolved title or toTitle)
-  const existingByTitle = new Map();
-  for (const link of existingLinks) {
-    // Use toTitle for unresolved, or look up the resolved note's title
-    const key = link.toTitle ?? link.toId;
-    existingByTitle.set(key, link);
-  }
-
-  // We need to know which titles are currently linked
-  // Build a set of existing toTitles for quick lookup
-  const existingTitles = new Set();
-  for (const link of existingLinks) {
-    if (link.toTitle) {
-      existingTitles.add(link.toTitle);
-    }
-  }
-
-  // Also resolve existing links that have toId to get their titles
-  const resolvedIds = existingLinks
-    .filter((l) => l.toId)
-    .map((l) => l.toId);
-  const resolvedNotes = resolvedIds.length
-    ? await tx.note.findMany({
-        where: { id: { in: resolvedIds } },
-        select: { id: true, title: true },
-      })
-    : [];
-  const idToTitle = new Map(resolvedNotes.map((n) => [n.id, n.title]));
-
-  // Build full set of existing link target titles
-  const existingTargetTitles = new Set();
-  for (const link of existingLinks) {
-    if (link.toTitle) {
-      existingTargetTitles.add(link.toTitle);
-    } else if (link.toId) {
-      const t = idToTitle.get(link.toId);
-      if (t) existingTargetTitles.add(t);
-    }
-  }
-
-  // Determine new and removed wikilinks
-  const currentSet = new Set(wikilinks);
-  const toCreate = wikilinks.filter((t) => !existingTargetTitles.has(t));
-  const toRemove = existingLinks.filter((link) => {
-    const title = link.toTitle ?? idToTitle.get(link.toId);
-    return title && !currentSet.has(title);
-  });
-
-  // Remove stale links
-  if (toRemove.length) {
-    await tx.link.deleteMany({
-      where: { id: { in: toRemove.map((l) => l.id) } },
-    });
-  }
-
-  // Create new links
-  for (const title of toCreate) {
-    // Look up target note by title within the same user's notes
-    const target = await tx.note.findFirst({
-      where: { title, userId },
-      select: { id: true },
-    });
-
-    await tx.link.create({
-      data: {
-        fromId: noteId,
-        toId: target?.id ?? null,
-        toTitle: target ? null : title,
-      },
-    });
-  }
-}
 
 /**
  * Resolve any existing unresolved links whose `toTitle` matches the given title.

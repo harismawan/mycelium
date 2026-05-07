@@ -1,0 +1,4 @@
+-- searchVector is a GENERATED ALWAYS AS ... STORED column (added in 20260427154806_add_search_vector).
+-- PostgreSQL automatically recomputes it on every INSERT or UPDATE to title/content,
+-- so no additional trigger is needed.
+-- This migration is a no-op that confirms the generated column approach is sufficient.

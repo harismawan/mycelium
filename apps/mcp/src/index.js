@@ -59,9 +59,14 @@ async function startStdio() {
   process.stdin.on('end', cleanup);
 }
 
+// Cache MCP server instances by apiKeyId — avoids recreating and re-registering
+// all tools on every request for the same API key.
+const serverCache = new Map();
+
 /**
  * Start the MCP server with Streamable HTTP transport using Bun.serve.
  * Auth is resolved per incoming request from the Authorization header.
+ * Server instances are cached by apiKeyId and reused across serial requests.
  */
 async function startHttp() {
   const port = parseInt(process.env.MCP_PORT || '3001', 10);
@@ -87,7 +92,14 @@ async function startHttp() {
 
       try {
         const auth = await resolveAuth('http', req);
-        const server = createServer(auth);
+
+        // Reuse the cached server for this API key to avoid repeated tool registration
+        let server = serverCache.get(auth.apiKeyId);
+        if (!server) {
+          server = createServer(auth);
+          serverCache.set(auth.apiKeyId, server);
+        }
+
         const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined });
 
         transport.onclose = async () => {

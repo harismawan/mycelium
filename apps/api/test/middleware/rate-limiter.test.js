@@ -18,6 +18,39 @@ function resetStore() {
 let redisConnected = true;
 
 const mockRedisClient = {
+  // eval simulates the Lua rate-limit script: prune + count + conditionally add
+  // Args: script, numkeys, key, windowStart, maxRequests, now, member, windowSeconds
+  eval: async (_script, _numkeys, key, windowStart, maxRequests, now, member, windowSeconds) => {
+    // Prune expired entries (score <= windowStart)
+    const set = sortedSets.get(key);
+    if (set) {
+      const ws = Number(windowStart);
+      for (const [m, score] of set.entries()) {
+        if (score <= ws) set.delete(m);
+      }
+    }
+
+    const currentSet = sortedSets.get(key);
+    const count = currentSet ? currentSet.size : 0;
+    const maxReqs = Number(maxRequests);
+
+    if (count >= maxReqs) {
+      const sorted = currentSet ? [...currentSet.entries()].sort((a, b) => a[1] - b[1]) : [];
+      const oldestMember = sorted.length > 0 ? sorted[0][0] : '';
+      return ['limited', count, oldestMember];
+    }
+
+    // Add new member
+    if (!sortedSets.has(key)) sortedSets.set(key, new Map());
+    sortedSets.get(key).set(member, Number(now));
+    ttls.set(key, Number(windowSeconds));
+
+    const finalSet = sortedSets.get(key);
+    const sorted = [...finalSet.entries()].sort((a, b) => a[1] - b[1]);
+    const oldestMember = sorted.length > 0 ? sorted[0][0] : '';
+    return ['ok', count, oldestMember];
+  },
+  // Keep individual methods available (used by tests that access the store directly)
   zadd: async (key, score, member) => {
     if (!sortedSets.has(key)) sortedSets.set(key, new Map());
     sortedSets.get(key).set(member, score);
@@ -29,7 +62,6 @@ const mockRedisClient = {
   zrange: async (key, start, stop) => {
     const set = sortedSets.get(key);
     if (!set || set.size === 0) return [];
-    // Sort by score, return members in range
     const sorted = [...set.entries()].sort((a, b) => a[1] - b[1]);
     const slice = sorted.slice(start, stop + 1);
     return slice.map(([member]) => member);

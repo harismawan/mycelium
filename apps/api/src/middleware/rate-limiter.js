@@ -7,13 +7,38 @@ import { getRedisClient, prefixKey, isRedisConnected } from '@mycelium/shared/re
  * @property {number} [maxRequests=60] - Max requests per window
  */
 
+// Atomic Lua script: prune expired entries, check limit, add new entry, return result.
+// Returns ['limited', count, oldestMember] if rate limited, ['ok', count, oldestMember] otherwise.
+// Executes in a single Redis round-trip instead of 4–5 sequential calls.
+const RATE_LIMIT_SCRIPT = `
+local key = KEYS[1]
+local window_start = ARGV[1]
+local max_requests = tonumber(ARGV[2])
+local now = tonumber(ARGV[3])
+local member = ARGV[4]
+local window_seconds = tonumber(ARGV[5])
+
+redis.call('ZREMRANGEBYSCORE', key, 0, window_start)
+local count = redis.call('ZCARD', key)
+
+if count >= max_requests then
+  local oldest = redis.call('ZRANGE', key, 0, 0)
+  return {'limited', count, oldest[1] or ''}
+end
+
+redis.call('ZADD', key, now, member)
+redis.call('EXPIRE', key, window_seconds)
+local oldest = redis.call('ZRANGE', key, 0, 0)
+return {'ok', count, oldest[1] or ''}
+`;
+
 /**
  * Creates an Elysia plugin that rate-limits API key requests using a
  * sliding window algorithm backed by Redis sorted sets.
  *
  * Each API key gets a sorted set where members are unique request IDs
- * and scores are timestamps. Expired entries are pruned on each request
- * using ZREMRANGEBYSCORE, and the current count is checked with ZCARD.
+ * and scores are timestamps. The entire check-and-increment is executed
+ * atomically via a Lua script in a single Redis round-trip.
  *
  * JWT-authenticated requests pass through without rate limiting or headers.
  * On Redis errors the middleware fails open (logs a warning, allows the request).
@@ -50,17 +75,23 @@ export function rateLimiter(config = {}) {
         const key = prefixKey(`ratelimit:${apiKeyId}`);
         const now = Date.now();
         const windowStart = now - windowMs;
+        const member = `${now}:${Math.random().toString(36).slice(2, 8)}`;
 
-        // Remove expired entries outside the sliding window
-        await redis.zremrangebyscore(key, 0, windowStart);
+        // Single atomic round-trip: prune + count + conditionally add
+        const result = await redis.eval(
+          RATE_LIMIT_SCRIPT,
+          1,
+          key,
+          windowStart,
+          maxRequests,
+          now,
+          member,
+          windowSeconds + 1,
+        );
+        const [status, count, oldestMember] = result;
+        const oldestTs = oldestMember ? Number(oldestMember.split(':')[0]) : now;
 
-        // Count remaining entries in the window
-        const count = await redis.zcard(key);
-
-        if (count >= maxRequests) {
-          // Get the oldest member to calculate reset time
-          const oldest = await redis.zrange(key, 0, 0);
-          const oldestTs = oldest?.length ? Number(oldest[0].split(':')[0]) : now;
+        if (status === 'limited') {
           const resetTime = oldestTs + windowMs;
           const retryAfterSeconds = Math.ceil((resetTime - now) / 1000);
 
@@ -75,17 +106,8 @@ export function rateLimiter(config = {}) {
           };
         }
 
-        // Add current request — use timestamp + random suffix as member to ensure uniqueness
-        const member = `${now}:${Math.random().toString(36).slice(2, 8)}`;
-        await redis.zadd(key, now, member);
-
-        // Set TTL on the key so it auto-expires after the window
-        await redis.expire(key, windowSeconds + 1);
-
-        // Add rate limit headers
+        // Request allowed — count is the pre-add count
         const remaining = maxRequests - count - 1;
-        const oldestEntries = await redis.zrange(key, 0, 0);
-        const oldestTs = oldestEntries?.length ? Number(oldestEntries[0].split(':')[0]) : now;
         const resetEpoch = Math.ceil((oldestTs + windowMs) / 1000);
 
         ctx.set.headers['X-RateLimit-Limit'] = String(maxRequests);

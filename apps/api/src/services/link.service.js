@@ -16,27 +16,32 @@ export const LinkService = {
    * - Creates new Link records for newly added wikilinks
    * - Removes Link records for wikilinks no longer present
    *
-   * For each new wikilink, looks up the target note by title. If found,
-   * sets `toId`; otherwise stores the unresolved title in `toTitle`.
+   * Uses a single batch query to look up all target notes, then createMany
+   * to insert them — avoiding N+1 queries in the creation loop.
    *
    * @param {string} noteId - The source note ID.
    * @param {string[]} wikilinks - Deduplicated wikilink titles extracted from content.
+   * @param {{ tx?: import('@prisma/client').Prisma.TransactionClient, userId?: string }} [opts]
    * @returns {Promise<void>}
    *
    * Validates: Requirements 2.1, 2.2, 2.3, 2.6, 2.7
    */
-  async reconcileLinks(noteId, wikilinks) {
-    // Fetch the source note to scope target lookups to the same user
-    const sourceNote = await prisma.note.findUnique({
-      where: { id: noteId },
-      select: { userId: true },
-    });
-    if (!sourceNote) return;
+  async reconcileLinks(noteId, wikilinks, opts = {}) {
+    const db = opts.tx ?? prisma;
+    let { userId } = opts;
 
-    const { userId } = sourceNote;
+    if (!userId) {
+      // Fetch the source note to scope target lookups to the same user
+      const sourceNote = await db.note.findUnique({
+        where: { id: noteId },
+        select: { userId: true },
+      });
+      if (!sourceNote) return;
+      userId = sourceNote.userId;
+    }
 
     // Get existing outgoing links for this note
-    const existingLinks = await prisma.link.findMany({
+    const existingLinks = await db.link.findMany({
       where: { fromId: noteId },
       select: { id: true, toTitle: true, toId: true },
     });
@@ -46,7 +51,7 @@ export const LinkService = {
       .filter((l) => l.toId)
       .map((l) => l.toId);
     const resolvedNotes = resolvedIds.length
-      ? await prisma.note.findMany({
+      ? await db.note.findMany({
           where: { id: { in: resolvedIds } },
           select: { id: true, title: true },
         })
@@ -74,24 +79,25 @@ export const LinkService = {
 
     // Remove stale links
     if (toRemove.length) {
-      await prisma.link.deleteMany({
+      await db.link.deleteMany({
         where: { id: { in: toRemove.map((l) => l.id) } },
       });
     }
 
-    // Create new links
-    for (const title of toCreate) {
-      const target = await prisma.note.findFirst({
-        where: { title, userId },
-        select: { id: true },
+    // Batch-create new links: one findMany for all targets, then createMany
+    if (toCreate.length) {
+      const targets = await db.note.findMany({
+        where: { title: { in: toCreate }, userId },
+        select: { id: true, title: true },
       });
+      const titleToId = new Map(targets.map((n) => [n.title, n.id]));
 
-      await prisma.link.create({
-        data: {
+      await db.link.createMany({
+        data: toCreate.map((title) => ({
           fromId: noteId,
-          toId: target?.id ?? null,
-          toTitle: target ? null : title,
-        },
+          toId: titleToId.get(title) ?? null,
+          toTitle: titleToId.has(title) ? null : title,
+        })),
       });
     }
   },

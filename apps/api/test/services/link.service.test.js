@@ -12,6 +12,7 @@ const mockLink = {
   findMany: mock(() => []),
   deleteMany: mock(() => ({ count: 0 })),
   create: mock(() => ({})),
+  createMany: mock(() => ({ count: 0 })),
   updateMany: mock(() => ({ count: 0 })),
 };
 
@@ -36,6 +37,7 @@ beforeEach(() => {
   mockLink.findMany.mockReset();
   mockLink.deleteMany.mockReset();
   mockLink.create.mockReset();
+  mockLink.createMany.mockReset();
   mockLink.updateMany.mockReset();
 });
 
@@ -46,32 +48,26 @@ describe('LinkService.reconcileLinks', () => {
   test('creates new links for wikilinks not already in the database', async () => {
     mockNote.findUnique.mockResolvedValue({ userId: 'user_1' });
     mockLink.findMany.mockResolvedValue([]); // no existing links
-    mockNote.findFirst.mockResolvedValue({ id: 'target_1' }); // target found
+    // Batch target lookup returns the target note
+    mockNote.findMany.mockResolvedValue([{ id: 'target_1', title: 'Target Note' }]);
 
     await LinkService.reconcileLinks('note_1', ['Target Note']);
 
-    expect(mockLink.create).toHaveBeenCalledWith({
-      data: {
-        fromId: 'note_1',
-        toId: 'target_1',
-        toTitle: null,
-      },
+    expect(mockLink.createMany).toHaveBeenCalledWith({
+      data: [{ fromId: 'note_1', toId: 'target_1', toTitle: null }],
     });
   });
 
   test('creates unresolved link when target note not found', async () => {
     mockNote.findUnique.mockResolvedValue({ userId: 'user_1' });
     mockLink.findMany.mockResolvedValue([]);
-    mockNote.findFirst.mockResolvedValue(null); // target not found
+    // Batch target lookup returns nothing — unresolved link
+    mockNote.findMany.mockResolvedValue([]);
 
     await LinkService.reconcileLinks('note_1', ['Missing Note']);
 
-    expect(mockLink.create).toHaveBeenCalledWith({
-      data: {
-        fromId: 'note_1',
-        toId: null,
-        toTitle: 'Missing Note',
-      },
+    expect(mockLink.createMany).toHaveBeenCalledWith({
+      data: [{ fromId: 'note_1', toId: null, toTitle: 'Missing Note' }],
     });
   });
 

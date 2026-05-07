@@ -1,5 +1,5 @@
 import { useEffect, useCallback, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import styled from 'styled-components';
 import { Code, Star, Save, PanelRight } from 'lucide-react';
 import { useNote, useUpdateNote } from '../api/hooks.js';
@@ -10,6 +10,7 @@ import BlockNoteEditor from '../components/editor/BlockNoteEditor.jsx';
 import DiffView from '../components/editor/DiffView.jsx';
 import {
   IconButton as ToolbarButton,
+  GhostButton,
   LoadingState,
   ErrorState,
 } from '../styles/shared.js';
@@ -118,6 +119,7 @@ const CodeArea = styled.textarea`
  */
 export default function EditorView() {
   const { slug } = useParams();
+  const navigate = useNavigate();
   const selectNote = useNotesStore((s) => s.selectNote);
   const togglePin = useNotesStore((s) => s.togglePin);
   const pinnedSlugs = useNotesStore((s) => s.pinnedSlugs);
@@ -159,6 +161,13 @@ export default function EditorView() {
     );
   }, [content, noteData, updateNote, resetDirty]);
 
+  // Auto-save after 2 seconds of inactivity
+  useEffect(() => {
+    if (!isDirty || updateNote.isPending) return;
+    const timer = setTimeout(() => handleSave(), 2000);
+    return () => clearTimeout(timer);
+  }, [content, isDirty, updateNote.isPending, handleSave]);
+
   const handleTitleDoubleClick = () => {
     setTitleDraft(noteData?.title ?? '');
     setEditingTitle(true);
@@ -168,7 +177,13 @@ export default function EditorView() {
     const trimmed = titleDraft.trim();
     if (trimmed && trimmed !== noteData?.title) {
       const tags = noteData?.tags?.map((t) => t.name ?? t) ?? [];
-      updateNote.mutate({ title: trimmed, tags });
+      updateNote.mutate({ title: trimmed, tags }, {
+        onSuccess: (updated) => {
+          if (updated?.slug && updated.slug !== slug) {
+            navigate(`/notes/${updated.slug}`, { replace: true });
+          }
+        },
+      });
     }
     setEditingTitle(false);
   };
@@ -179,6 +194,16 @@ export default function EditorView() {
   };
 
   if (isLoading) return <LoadingState>Loading note…</LoadingState>;
+  if (error?.status === 404) {
+    return (
+      <ErrorState>
+        <div>This note doesn't exist or has been deleted.</div>
+        <GhostButton onClick={() => navigate('/')} style={{ marginTop: 12 }}>
+          Go back
+        </GhostButton>
+      </ErrorState>
+    );
+  }
   if (error) return <ErrorState>Failed to load note: {error.message}</ErrorState>;
 
   // Content is stored without frontmatter — pass directly to editor
@@ -198,7 +223,7 @@ export default function EditorView() {
           />
         ) : (
           <TitleDisplay onDoubleClick={handleTitleDoubleClick} title="Double-click to edit title">
-            {noteData?.title ?? slug}
+            {(updateNote.isPending && updateNote.variables?.title) || noteData?.title || slug}
           </TitleDisplay>
         )}
         {isDirty && <DirtyDot title="Unsaved changes" />}

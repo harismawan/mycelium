@@ -144,17 +144,13 @@ describe('AuthService.register', () => {
 // ---------------------------------------------------------------------------
 describe('AuthService.login', () => {
   /** Validates: Requirements 3.2 */
-  test('returns user and JWT token for valid credentials', async () => {
+  test('returns user for valid credentials (token handled by SessionService)', async () => {
     mockUser.findUnique.mockResolvedValue(testUser);
 
     const result = await AuthService.login('test@example.com', 'secret123');
 
     expect(result.user).toEqual(userWithoutPassword);
-    expect(result.token).toBe('token_user_1');
-    expect(mockJwt.sign).toHaveBeenCalled();
-    const signCall = mockJwt.sign.mock.calls[0];
-    expect(signCall[0].sub).toBe('user_1');
-    expect(signCall[0].email).toBe('test@example.com');
+    expect(result).not.toHaveProperty('token');
   });
 
   /** Validates: Requirements 3.6 */

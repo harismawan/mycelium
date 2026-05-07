@@ -6,6 +6,7 @@ import { rateLimiter } from '../middleware/rate-limiter.js';
 import { NoteService } from '../services/note.service.js';
 import { LinkService } from '../services/link.service.js';
 import { RevisionService } from '../services/revision.service.js';
+import { SearchService } from '../services/search.service.js';
 import { ActivityLogService } from '../services/activity-log.service.js';
 import {
   ErrorResponse,
@@ -13,6 +14,7 @@ import {
   NoteResponse,
   PaginatedNotesResponse,
   NoteCountResponse,
+  SearchResponse,
   RevisionResponse,
   RevisionListResponse,
   BacklinksResponse,
@@ -35,36 +37,28 @@ export const noteRoutes = new Elysia({ prefix: '/api/v1/notes' })
   .post(
     '/',
     async (/** @type {{ body: { title: string, content: string, status?: string, tags?: string[] }, user: { id: string }, authType: string, apiKeyId: string|null, apiKeyName: string|null, set: any }} */ ctx) => {
-      try {
-        const note = await NoteService.createNote(ctx.user.id, {
-          ...ctx.body,
-          authType: ctx.authType,
+      const note = await NoteService.createNote(ctx.user.id, {
+        ...ctx.body,
+        authType: ctx.authType,
+        apiKeyId: ctx.apiKeyId,
+        apiKeyName: ctx.apiKeyName,
+      });
+      ctx.set.status = 201;
+
+      if (ctx.authType === 'apikey') {
+        await ActivityLogService.logAction({
+          userId: ctx.user.id,
           apiKeyId: ctx.apiKeyId,
           apiKeyName: ctx.apiKeyName,
+          action: 'note:create',
+          targetResourceId: note.id,
+          targetResourceSlug: note.slug,
+          details: { title: ctx.body.title },
+          status: 'success',
         });
-        ctx.set.status = 201;
-
-        if (ctx.authType === 'apikey') {
-          await ActivityLogService.logAction({
-            userId: ctx.user.id,
-            apiKeyId: ctx.apiKeyId,
-            apiKeyName: ctx.apiKeyName,
-            action: 'note:create',
-            targetResourceId: note.id,
-            targetResourceSlug: note.slug,
-            details: { title: ctx.body.title },
-            status: 'success',
-          });
-        }
-
-        return note;
-      } catch (err) {
-        if (err && typeof err === 'object' && 'statusCode' in err) {
-          ctx.set.status = /** @type {any} */ (err).statusCode;
-          return { error: /** @type {any} */ (err).message };
-        }
-        throw err;
       }
+
+      return note;
     },
     {
       body: t.Object({
@@ -156,30 +150,62 @@ export const noteRoutes = new Elysia({ prefix: '/api/v1/notes' })
     },
   )
 
+  // GET /search — full-text search using PostgreSQL tsvector
+  .get(
+    '/search',
+    async (/** @type {{ query: { q: string, cursor?: string, limit?: string, status?: string, tag?: string }, user: { id: string } }} */ ctx) => {
+      const { q, cursor, limit, status, tag } = ctx.query;
+      return SearchService.search(ctx.user.id, q, {
+        cursor: cursor || undefined,
+        limit: limit ? parseInt(limit, 10) : undefined,
+        status: status || undefined,
+        tag: tag || undefined,
+      });
+    },
+    {
+      query: t.Object({
+        q: t.String({ minLength: 1, description: 'Search query' }),
+        cursor: t.Optional(t.String()),
+        limit: t.Optional(t.String()),
+        status: t.Optional(
+          t.Union([
+            t.Literal(NoteStatus.DRAFT),
+            t.Literal(NoteStatus.PUBLISHED),
+            t.Literal(NoteStatus.ARCHIVED),
+          ]),
+        ),
+        tag: t.Optional(t.String()),
+      }),
+      response: {
+        200: SearchResponse,
+        401: ErrorResponse,
+      },
+      detail: {
+        summary: 'Full-text search notes',
+        description: 'Searches notes using PostgreSQL tsvector full-text search with ts_rank relevance scoring. Results are sorted by rank descending. Requires JWT cookie or Bearer API key authentication.',
+        tags: ['Notes'],
+        operationId: 'searchNotes',
+        security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
+      },
+    },
+  )
+
   // GET /:slug — get a single note; supports ?format=md for raw Markdown
   .get(
     '/:slug',
     async (/** @type {{ params: { slug: string }, query: { format?: string }, user: { id: string }, set: any }} */ ctx) => {
-      try {
-        if (ctx.query.format === 'md') {
-          const markdown = await NoteService.getNoteMarkdown(ctx.user.id, ctx.params.slug);
-          ctx.set.headers['content-type'] = 'text/markdown; charset=utf-8';
-          return markdown;
-        }
-
-        const note = await NoteService.getNote(ctx.user.id, ctx.params.slug);
-        if (!note) {
-          ctx.set.status = 404;
-          return { error: 'Note not found' };
-        }
-        return note;
-      } catch (err) {
-        if (err && typeof err === 'object' && 'statusCode' in err) {
-          ctx.set.status = /** @type {any} */ (err).statusCode;
-          return { error: /** @type {any} */ (err).message };
-        }
-        throw err;
+      if (ctx.query.format === 'md') {
+        const markdown = await NoteService.getNoteMarkdown(ctx.user.id, ctx.params.slug);
+        ctx.set.headers['content-type'] = 'text/markdown; charset=utf-8';
+        return markdown;
       }
+
+      const note = await NoteService.getNote(ctx.user.id, ctx.params.slug);
+      if (!note) {
+        ctx.set.status = 404;
+        return { error: 'Note not found' };
+      }
+      return note;
     },
     {
       params: t.Object({
@@ -206,35 +232,27 @@ export const noteRoutes = new Elysia({ prefix: '/api/v1/notes' })
   .patch(
     '/:slug',
     async (/** @type {{ params: { slug: string }, body: { title?: string, content?: string, status?: string, tags?: string[], message?: string }, user: { id: string }, authType: string, apiKeyId: string|null, apiKeyName: string|null, set: any }} */ ctx) => {
-      try {
-        const note = await NoteService.updateNote(ctx.user.id, ctx.params.slug, {
-          ...ctx.body,
-          authType: ctx.authType,
+      const note = await NoteService.updateNote(ctx.user.id, ctx.params.slug, {
+        ...ctx.body,
+        authType: ctx.authType,
+        apiKeyId: ctx.apiKeyId,
+        apiKeyName: ctx.apiKeyName,
+      });
+
+      if (ctx.authType === 'apikey') {
+        await ActivityLogService.logAction({
+          userId: ctx.user.id,
           apiKeyId: ctx.apiKeyId,
           apiKeyName: ctx.apiKeyName,
+          action: 'note:update',
+          targetResourceId: note.id,
+          targetResourceSlug: ctx.params.slug,
+          details: { fields: Object.keys(ctx.body) },
+          status: 'success',
         });
-
-        if (ctx.authType === 'apikey') {
-          await ActivityLogService.logAction({
-            userId: ctx.user.id,
-            apiKeyId: ctx.apiKeyId,
-            apiKeyName: ctx.apiKeyName,
-            action: 'note:update',
-            targetResourceId: note.id,
-            targetResourceSlug: ctx.params.slug,
-            details: { fields: Object.keys(ctx.body) },
-            status: 'success',
-          });
-        }
-
-        return note;
-      } catch (err) {
-        if (err && typeof err === 'object' && 'statusCode' in err) {
-          ctx.set.status = /** @type {any} */ (err).statusCode;
-          return { error: /** @type {any} */ (err).message };
-        }
-        throw err;
       }
+
+      return note;
     },
     {
       params: t.Object({
@@ -272,30 +290,22 @@ export const noteRoutes = new Elysia({ prefix: '/api/v1/notes' })
   .delete(
     '/:slug',
     async (/** @type {{ params: { slug: string }, user: { id: string }, authType: string, apiKeyId: string|null, apiKeyName: string|null, set: any }} */ ctx) => {
-      try {
-        await NoteService.archiveNote(ctx.user.id, ctx.params.slug);
+      await NoteService.archiveNote(ctx.user.id, ctx.params.slug);
 
-        if (ctx.authType === 'apikey') {
-          await ActivityLogService.logAction({
-            userId: ctx.user.id,
-            apiKeyId: ctx.apiKeyId,
-            apiKeyName: ctx.apiKeyName,
-            action: 'note:archive',
-            targetResourceId: null,
-            targetResourceSlug: ctx.params.slug,
-            details: {},
-            status: 'success',
-          });
-        }
-
-        return { message: 'Note archived' };
-      } catch (err) {
-        if (err && typeof err === 'object' && 'statusCode' in err) {
-          ctx.set.status = /** @type {any} */ (err).statusCode;
-          return { error: /** @type {any} */ (err).message };
-        }
-        throw err;
+      if (ctx.authType === 'apikey') {
+        await ActivityLogService.logAction({
+          userId: ctx.user.id,
+          apiKeyId: ctx.apiKeyId,
+          apiKeyName: ctx.apiKeyName,
+          action: 'note:archive',
+          targetResourceId: null,
+          targetResourceSlug: ctx.params.slug,
+          details: {},
+          status: 'success',
+        });
       }
+
+      return { message: 'Note archived' };
     },
     {
       params: t.Object({
@@ -319,30 +329,22 @@ export const noteRoutes = new Elysia({ prefix: '/api/v1/notes' })
   .delete(
     '/:slug/permanent',
     async (/** @type {{ params: { slug: string }, user: { id: string }, authType: string, apiKeyId: string|null, apiKeyName: string|null, set: any }} */ ctx) => {
-      try {
-        await NoteService.deleteNote(ctx.user.id, ctx.params.slug);
+      await NoteService.deleteNote(ctx.user.id, ctx.params.slug);
 
-        if (ctx.authType === 'apikey') {
-          await ActivityLogService.logAction({
-            userId: ctx.user.id,
-            apiKeyId: ctx.apiKeyId,
-            apiKeyName: ctx.apiKeyName,
-            action: 'note:delete',
-            targetResourceId: null,
-            targetResourceSlug: ctx.params.slug,
-            details: {},
-            status: 'success',
-          });
-        }
-
-        return { message: 'Note deleted permanently' };
-      } catch (err) {
-        if (err && typeof err === 'object' && 'statusCode' in err) {
-          ctx.set.status = /** @type {any} */ (err).statusCode;
-          return { error: /** @type {any} */ (err).message };
-        }
-        throw err;
+      if (ctx.authType === 'apikey') {
+        await ActivityLogService.logAction({
+          userId: ctx.user.id,
+          apiKeyId: ctx.apiKeyId,
+          apiKeyName: ctx.apiKeyName,
+          action: 'note:delete',
+          targetResourceId: null,
+          targetResourceSlug: ctx.params.slug,
+          details: {},
+          status: 'success',
+        });
       }
+
+      return { message: 'Note deleted permanently' };
     },
     {
       params: t.Object({
@@ -366,39 +368,31 @@ export const noteRoutes = new Elysia({ prefix: '/api/v1/notes' })
   .post(
     '/:slug/revert',
     async (/** @type {{ params: { slug: string }, body: { revisionId: string }, user: { id: string }, authType: string, apiKeyId: string|null, apiKeyName: string|null, set: any }} */ ctx) => {
-      try {
-        const note = await NoteService.revertNote(
-          ctx.user.id,
-          ctx.params.slug,
-          ctx.body.revisionId,
-          {
-            authType: ctx.authType,
-            apiKeyId: ctx.apiKeyId,
-            apiKeyName: ctx.apiKeyName,
-          },
-        );
+      const note = await NoteService.revertNote(
+        ctx.user.id,
+        ctx.params.slug,
+        ctx.body.revisionId,
+        {
+          authType: ctx.authType,
+          apiKeyId: ctx.apiKeyId,
+          apiKeyName: ctx.apiKeyName,
+        },
+      );
 
-        if (ctx.authType === 'apikey') {
-          await ActivityLogService.logAction({
-            userId: ctx.user.id,
-            apiKeyId: ctx.apiKeyId,
-            apiKeyName: ctx.apiKeyName,
-            action: 'note:revert',
-            targetResourceId: note.id,
-            targetResourceSlug: ctx.params.slug,
-            details: { revisionId: ctx.body.revisionId },
-            status: 'success',
-          });
-        }
-
-        return note;
-      } catch (err) {
-        if (err && typeof err === 'object' && 'statusCode' in err) {
-          ctx.set.status = /** @type {any} */ (err).statusCode;
-          return { error: /** @type {any} */ (err).message };
-        }
-        throw err;
+      if (ctx.authType === 'apikey') {
+        await ActivityLogService.logAction({
+          userId: ctx.user.id,
+          apiKeyId: ctx.apiKeyId,
+          apiKeyName: ctx.apiKeyName,
+          action: 'note:revert',
+          targetResourceId: note.id,
+          targetResourceSlug: ctx.params.slug,
+          details: { revisionId: ctx.body.revisionId },
+          status: 'success',
+        });
       }
+
+      return note;
     },
     {
       params: t.Object({

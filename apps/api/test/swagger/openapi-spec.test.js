@@ -394,7 +394,7 @@ describe('OpenAPI Spec — Operation Metadata Completeness', () => {
     expect(uniqueIds.size).toBe(ids.length);
   });
 
-  test('total count of operations matches expected (31 endpoints)', () => {
-    expect(operations.length).toBe(31);
+  test('total count of operations matches expected (32 endpoints)', () => {
+    expect(operations.length).toBe(32);
   });
 });

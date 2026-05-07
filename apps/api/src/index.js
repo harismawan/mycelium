@@ -37,6 +37,22 @@ const enableSwagger = process.env.ENABLE_SWAGGER === 'true';
 const shouldEnableSwagger = !isProduction || enableSwagger;
 
 const app = new Elysia()
+  .onError(({ error, set, request }) => {
+    if (error && typeof error === 'object' && 'statusCode' in error) {
+      set.status = /** @type {any} */ (error).statusCode;
+      return { error: /** @type {any} */ (error).message };
+    }
+    console.error(JSON.stringify({
+      timestamp: new Date().toISOString(),
+      level: 'error',
+      message: 'unhandled_error',
+      path: new URL(request.url).pathname,
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    }));
+    set.status = 500;
+    return { error: 'Internal server error' };
+  })
   .use(
     cors({
       origin: process.env.CORS_ORIGIN || true,

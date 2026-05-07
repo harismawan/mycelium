@@ -79,6 +79,33 @@ const mockRedisClient = {
     return 1;
   },
   ttl: async (key) => ttls.get(key) ?? -1,
+  /**
+   * Minimal SCAN implementation: returns all matching keys in one pass (cursor '0' → done).
+   * Supports MATCH and COUNT options (COUNT is ignored — we always return all matches).
+   */
+  scan: async (cursor, ...args) => {
+    // Parse MATCH pattern from variadic args: ['MATCH', pattern, 'COUNT', n]
+    let pattern = '*';
+    for (let i = 0; i < args.length - 1; i++) {
+      if (args[i].toUpperCase() === 'MATCH') {
+        pattern = args[i + 1];
+        break;
+      }
+    }
+    // Convert Redis glob pattern to a regex
+    const regex = new RegExp(
+      '^' + pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.') + '$',
+    );
+    // Collect all keys from all stores
+    const allKeys = new Set([
+      ...store.keys(),
+      ...hashes.keys(),
+      ...sets.keys(),
+    ]);
+    const matched = [...allKeys].filter((k) => regex.test(k));
+    // Return ['0', keys] — '0' cursor signals end of scan
+    return ['0', matched];
+  },
 };
 
 // ---------------------------------------------------------------------------

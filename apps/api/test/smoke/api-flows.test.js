@@ -18,6 +18,7 @@ const mockLink = {
   findMany: mock(() => []),
   deleteMany: mock(() => ({ count: 0 })),
   create: mock(() => ({})),
+  createMany: mock(() => ({ count: 0 })),
   updateMany: mock(() => ({ count: 0 })),
 };
 const mockTag = {
@@ -158,20 +159,23 @@ describe('Smoke: Auth flow (register → login → verify JWT)', () => {
     expect(mockBcrypt.hash).toHaveBeenCalledWith('password123', 10);
   });
 
-  test('login with same credentials returns JWT token', async () => {
+  test('login with same credentials returns user (token issued by SessionService)', async () => {
     const storedUser = { ...registeredUser, password: 'hashed_password123' };
     mockUser.findUnique.mockResolvedValue(storedUser);
 
     const result = await AuthService.login('smoke@example.com', 'password123');
 
-    expect(result.token).toBe(`token_${userId}`);
+    // AuthService.login no longer issues a token — SessionService.createSession does.
     expect(result.user.id).toBe(userId);
     expect(result.user).not.toHaveProperty('password');
+    expect(result).not.toHaveProperty('token');
   });
 
   test('verifyJwt with issued token returns the user', async () => {
     mockUser.findUnique.mockResolvedValue(registeredUser);
-
+    // AuthService.verifyJwt delegates to SessionService.verifyToken.
+    // The mockJwt.verify stub covers that path since SessionService is imported
+    // after the mock.module('jsonwebtoken') registration.
     const user = await AuthService.verifyJwt(`token_${userId}`);
 
     expect(user).not.toBeNull();
@@ -259,26 +263,27 @@ describe('Smoke: Wikilink/backlink reconciliation flow', () => {
       id: 'note_src',
       content,
     });
-    mockNote.findMany.mockResolvedValue([]); // no slug collisions
+    // First call: slug collision check (no collisions)
+    // Second call: batch target lookup — "Target Note" found, "Missing Note" not
+    mockNote.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: 'note_target', title: 'Target Note' }]);
     mockLink.findMany.mockResolvedValue([]); // no existing links
-
-    // First wikilink target found, second not found
-    mockNote.findFirst
-      .mockResolvedValueOnce({ id: 'note_target' }) // "Target Note" resolved
-      .mockResolvedValueOnce(null);                   // "Missing Note" unresolved
 
     await NoteService.createNote(userId, { title: 'Source Note', content });
 
-    // Two link.create calls for the two wikilinks
-    expect(mockLink.create).toHaveBeenCalledTimes(2);
+    // Single createMany with both links (batch creation)
+    expect(mockLink.createMany).toHaveBeenCalledTimes(1);
+    const { data } = mockLink.createMany.mock.calls[0][0];
+    expect(data).toHaveLength(2);
 
-    const link1 = mockLink.create.mock.calls[0][0];
-    expect(link1.data.toId).toBe('note_target');
-    expect(link1.data.toTitle).toBeNull();
+    const resolved = data.find((l) => l.toId === 'note_target');
+    expect(resolved).toBeDefined();
+    expect(resolved.toTitle).toBeNull();
 
-    const link2 = mockLink.create.mock.calls[1][0];
-    expect(link2.data.toId).toBeNull();
-    expect(link2.data.toTitle).toBe('Missing Note');
+    const unresolved = data.find((l) => l.toTitle === 'Missing Note');
+    expect(unresolved).toBeDefined();
+    expect(unresolved.toId).toBeNull();
   });
 
   test('creating target note resolves unresolved links', async () => {

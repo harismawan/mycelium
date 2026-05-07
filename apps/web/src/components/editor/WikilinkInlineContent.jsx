@@ -1,5 +1,4 @@
 import { createReactInlineContentSpec } from '@blocknote/react';
-import { useNavigate } from 'react-router-dom';
 
 /**
  * Custom BlockNote inline content type for [[wikilinks]].
@@ -23,7 +22,6 @@ export const Wikilink = createReactInlineContentSpec(
           href={`/notes/${slug}`}
           onClick={(e) => {
             e.preventDefault();
-            // Use window history for SPA navigation since we can't use hooks here
             window.history.pushState({}, '', `/notes/${slug}`);
             window.dispatchEvent(new PopStateEvent('popstate'));
           }}

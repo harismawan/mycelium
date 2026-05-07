@@ -53,8 +53,8 @@ export const NoteResponse = t.Object({
     description: 'Publication status',
   }),
   pinned: t.Boolean({ description: 'Whether the note is pinned' }),
-  createdAt: t.String({ format: 'date-time', description: 'Creation timestamp' }),
-  updatedAt: t.String({ format: 'date-time', description: 'Last update timestamp' }),
+  createdAt: t.Date({ description: 'Creation timestamp' }),
+  updatedAt: t.Date({ description: 'Last update timestamp' }),
   tags: t.Array(t.Object({ id: t.String(), name: t.String() }), {
     description: 'Tags attached to this note',
   }),
@@ -75,6 +75,24 @@ export const NoteCountResponse = t.Object({
   archived: t.Number({ description: 'Number of archived notes' }),
 });
 
+/** Full-text search results with relevance rank */
+export const SearchResponse = t.Object({
+  notes: t.Array(
+    t.Object({
+      id: t.String(),
+      slug: t.String(),
+      title: t.String(),
+      excerpt: t.Union([t.String(), t.Null()]),
+      status: t.String(),
+      rank: t.Number({ description: 'ts_rank relevance score' }),
+    }),
+    { description: 'Ranked search results' },
+  ),
+  nextCursor: t.Union([t.String(), t.Null()], {
+    description: 'Cursor for the next page, or null if no more results',
+  }),
+});
+
 // ─── Revision Responses ──────────────────────────────────────────────────────
 
 /** Single revision object */
@@ -83,10 +101,10 @@ export const RevisionResponse = t.Object({
   noteId: t.String({ description: 'Parent note ID' }),
   content: t.String({ description: 'Note content at this revision' }),
   message: t.Union([t.String(), t.Null()], { description: 'Revision message or null' }),
-  authType: t.String({ description: 'Authentication type used (jwt or apikey)' }),
+  authType: t.Union([t.String(), t.Null()], { description: 'Authentication type used (jwt or apikey)' }),
   apiKeyId: t.Union([t.String(), t.Null()], { description: 'API key ID if authenticated via API key' }),
   apiKeyName: t.Union([t.String(), t.Null()], { description: 'API key name if authenticated via API key' }),
-  createdAt: t.String({ format: 'date-time', description: 'Revision creation timestamp' }),
+  createdAt: t.Date({ description: 'Revision creation timestamp' }),
 });
 
 /** Paginated list of revisions */
@@ -142,7 +160,7 @@ export const ApiKeyCreatedResponse = t.Object({
   id: t.String({ description: 'API key ID' }),
   name: t.String({ description: 'API key name' }),
   scopes: t.Array(t.String(), { description: 'Granted scopes' }),
-  createdAt: t.String({ format: 'date-time', description: 'Creation timestamp' }),
+  createdAt: t.Date({ description: 'Creation timestamp' }),
   key: t.String({ description: 'Plaintext API key — shown only once' }),
 });
 
@@ -153,8 +171,8 @@ export const ApiKeyListResponse = t.Object({
       id: t.String(),
       name: t.String(),
       scopes: t.Array(t.String()),
-      lastUsedAt: t.Union([t.String({ format: 'date-time' }), t.Null()]),
-      createdAt: t.String({ format: 'date-time' }),
+      lastUsedAt: t.Union([t.Date(), t.Null()]),
+      createdAt: t.Date(),
     }),
     { description: 'Array of API key objects' },
   ),
@@ -172,7 +190,7 @@ export const ActivityLogResponse = t.Object({
       targetResourceSlug: t.Union([t.String(), t.Null()]),
       details: t.Object({}),
       status: t.String(),
-      createdAt: t.String({ format: 'date-time' }),
+      createdAt: t.Date(),
     }),
     { description: 'Array of activity log entries' },
   ),

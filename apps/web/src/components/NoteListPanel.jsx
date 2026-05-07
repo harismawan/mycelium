@@ -289,18 +289,22 @@ export default function NoteListPanel() {
     setTitleDraft(title);
   };
 
-  const handleTitleSave = async (slug) => {
+  const handleTitleSave = async (slug, originalTitle) => {
     const trimmed = titleDraft.trim();
     setEditingSlug(null);
-    if (!trimmed || trimmed === slug) return;
+    if (!trimmed || trimmed === originalTitle) return;
     try {
-      await apiPatch(`/notes/${slug}`, { title: trimmed });
+      const updated = await apiPatch(`/notes/${slug}`, { title: trimmed });
       qc.invalidateQueries({ queryKey: ['notes'] });
+      qc.invalidateQueries({ queryKey: ['notes', 'detail', slug] });
+      if (updated?.slug && updated.slug !== slug && selectedSlug === slug) {
+        navigate(`/notes/${updated.slug}`, { replace: true });
+      }
     } catch { /* ignore */ }
   };
 
-  const handleTitleKeyDown = (e, slug) => {
-    if (e.key === 'Enter') handleTitleSave(slug);
+  const handleTitleKeyDown = (e, slug, originalTitle) => {
+    if (e.key === 'Enter') handleTitleSave(slug, originalTitle);
     if (e.key === 'Escape') setEditingSlug(null);
   };
 
@@ -508,8 +512,8 @@ export default function NoteListPanel() {
                 <NoteTitleInput
                   value={titleDraft}
                   onChange={(e) => setTitleDraft(e.target.value)}
-                  onBlur={() => handleTitleSave(note.slug)}
-                  onKeyDown={(e) => handleTitleKeyDown(e, note.slug)}
+                  onBlur={() => handleTitleSave(note.slug, note.title)}
+                  onKeyDown={(e) => handleTitleKeyDown(e, note.slug, note.title)}
                   onClick={(e) => e.stopPropagation()}
                   autoFocus
                 />

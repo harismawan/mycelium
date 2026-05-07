@@ -156,6 +156,8 @@ export default function BlockNoteEditor({ initialContent = '', onSave }) {
         const processed = blocks.map((block) => convertWikilinksInBlock(block));
         const docIds = editor.document.map((b) => b.id);
         editor.replaceBlocks(docIds, processed);
+        // Clear undo history so Ctrl+Z can't undo the initial content load
+        editor._tiptapEditor?.commands.clearHistory();
       } catch {
         // fallback
       } finally {

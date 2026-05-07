@@ -8,6 +8,7 @@ import {
 } from '@mycelium/shared';
 import { prisma } from '../db.js';
 import { LinkService } from './link.service.js';
+import { sanitizeMarkdown } from '../utils/sanitize.js';
 
 /**
  * Note service handling CRUD operations, the Markdown save pipeline,
@@ -26,7 +27,8 @@ export const NoteService = {
    * @returns {Promise<import('@prisma/client').Note>} The created note with tags.
    */
   async createNote(userId, data) {
-    const { title, content, status, tags, authType, apiKeyId, apiKeyName } = data;
+    const { title, status, tags, authType, apiKeyId, apiKeyName } = data;
+    const content = sanitizeMarkdown(data.content);
     const { frontmatter } = parseFrontmatter(content);
     const excerpt = generateExcerpt(content);
     const wikilinks = extractWikilinks(content);
@@ -78,7 +80,7 @@ export const NoteService = {
       await LinkService.reconcileLinks(created.id, wikilinks, { tx, userId });
 
       // Resolve any unresolved links that match this note's title
-      await resolveUnresolvedLinks(tx, created.id, title);
+      await resolveUnresolvedLinks(tx, created.id, title, userId);
 
       return created;
     });
@@ -202,7 +204,7 @@ export const NoteService = {
     }
 
     const title = data.title ?? existing.title;
-    const content = data.content ?? existing.content;
+    const content = data.content !== undefined ? sanitizeMarkdown(data.content) : existing.content;
     const status = data.status ?? existing.status;
     const tags = data.tags;
     const message = data.message;
@@ -278,7 +280,7 @@ export const NoteService = {
       await LinkService.reconcileLinks(updated.id, wikilinks, { tx, userId });
 
       // Resolve unresolved links matching the (possibly new) title
-      await resolveUnresolvedLinks(tx, updated.id, title);
+      await resolveUnresolvedLinks(tx, updated.id, title, userId);
 
       return updated;
     });
@@ -398,11 +400,18 @@ export const NoteService = {
  * @param {string} noteId - The newly created/updated note ID.
  * @param {string} title - The note's title to match against unresolved `toTitle` values.
  */
-async function resolveUnresolvedLinks(tx, noteId, title) {
+async function resolveUnresolvedLinks(tx, noteId, title, userId) {
+  const userNotes = await tx.note.findMany({
+    where: { userId },
+    select: { id: true },
+  });
+  const noteIds = userNotes.map((n) => n.id);
+
   await tx.link.updateMany({
     where: {
       toId: null,
       toTitle: title,
+      fromId: { in: noteIds },
     },
     data: {
       toId: noteId,

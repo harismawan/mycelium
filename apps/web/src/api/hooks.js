@@ -155,7 +155,7 @@ export function useRevisions(slug, options = {}) {
 export function useSearch(query, options = {}) {
   return useQuery({
     queryKey: searchKeys.query(query),
-    queryFn: () => apiGet(`/notes?q=${encodeURIComponent(query)}`),
+    queryFn: () => apiGet(`/notes/search?q=${encodeURIComponent(query)}`),
     enabled: options.enabled ?? !!query,
   });
 }
@@ -191,7 +191,18 @@ export function useUpdateNote(slug) {
   return useMutation({
     /** @param {{ title?: string, content?: string, status?: string, tags?: string[], message?: string }} data */
     mutationFn: (data) => apiPatch(`/notes/${slug}`, data),
-    onSuccess: () => {
+    onMutate: async (data) => {
+      await qc.cancelQueries({ queryKey: noteKeys.detail(slug) });
+      const previous = qc.getQueryData(noteKeys.detail(slug));
+      qc.setQueryData(noteKeys.detail(slug), (old) => old ? { ...old, ...data } : old);
+      return { previous };
+    },
+    onError: (_err, _data, context) => {
+      if (context?.previous !== undefined) {
+        qc.setQueryData(noteKeys.detail(slug), context.previous);
+      }
+    },
+    onSettled: () => {
       qc.invalidateQueries({ queryKey: noteKeys.detail(slug) });
       qc.invalidateQueries({ queryKey: noteKeys.md(slug) });
       qc.invalidateQueries({ queryKey: noteKeys.all });
@@ -212,7 +223,18 @@ export function useArchiveNote(slug) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () => apiDelete(`/notes/${slug}`),
-    onSuccess: () => {
+    onMutate: async () => {
+      await qc.cancelQueries({ queryKey: noteKeys.detail(slug) });
+      const previous = qc.getQueryData(noteKeys.detail(slug));
+      qc.setQueryData(noteKeys.detail(slug), (old) => old ? { ...old, status: 'ARCHIVED' } : old);
+      return { previous };
+    },
+    onError: (_err, _data, context) => {
+      if (context?.previous !== undefined) {
+        qc.setQueryData(noteKeys.detail(slug), context.previous);
+      }
+    },
+    onSettled: () => {
       qc.invalidateQueries({ queryKey: noteKeys.all });
       qc.invalidateQueries({ queryKey: tagKeys.all });
       qc.invalidateQueries({ queryKey: graphKeys.all });

@@ -21,18 +21,10 @@ export const authRoutes = new Elysia({ prefix: '/api/v1/auth' })
   .post(
     '/register',
     async (/** @type {{ body: { email: string, password: string, displayName: string }, set: any }} */ ctx) => {
-      try {
-        const { email, password, displayName } = ctx.body;
-        const user = await AuthService.register(email, password, displayName);
-        ctx.set.status = 201;
-        return user;
-      } catch (err) {
-        if (err && typeof err === 'object' && 'statusCode' in err) {
-          ctx.set.status = /** @type {any} */ (err).statusCode;
-          return { error: /** @type {any} */ (err).message };
-        }
-        throw err;
-      }
+      const { email, password, displayName } = ctx.body;
+      const user = await AuthService.register(email, password, displayName);
+      ctx.set.status = 201;
+      return user;
     },
     {
       body: t.Object({
@@ -91,11 +83,7 @@ export const authRoutes = new Elysia({ prefix: '/api/v1/auth' })
 
         return { user, token: tokens.accessToken };
       } catch (err) {
-        if (err && typeof err === 'object' && 'statusCode' in err) {
-          ctx.set.status = /** @type {any} */ (err).statusCode;
-          return { error: /** @type {any} */ (err).message };
-        }
-        // Redis or other infrastructure error during session creation
+        if (err && typeof err === 'object' && 'statusCode' in err) throw err;
         ctx.set.status = 503;
         return { error: 'Service temporarily unavailable: session creation failed' };
       }
@@ -257,16 +245,8 @@ export const authRoutes = new Elysia({ prefix: '/api/v1/auth' })
   .patch(
     '/me',
     async (/** @type {{ body: { displayName?: string }, user: { id: string }, set: any }} */ ctx) => {
-      try {
-        const user = await AuthService.updateProfile(ctx.user.id, ctx.body);
-        return { user };
-      } catch (err) {
-        if (err && typeof err === 'object' && 'statusCode' in err) {
-          ctx.set.status = /** @type {any} */ (err).statusCode;
-          return { error: /** @type {any} */ (err).message };
-        }
-        throw err;
-      }
+      const user = await AuthService.updateProfile(ctx.user.id, ctx.body);
+      return { user };
     },
     {
       body: t.Object({
@@ -292,25 +272,17 @@ export const authRoutes = new Elysia({ prefix: '/api/v1/auth' })
   .post(
     '/change-password',
     async (/** @type {{ body: { currentPassword: string, newPassword: string }, user: { id: string }, cookie: Record<string, any>, set: any }} */ ctx) => {
-      try {
-        // Extract the caller's session ID so it can be preserved during bulk revocation.
-        // This keeps the user logged in on the current device while signing out all others.
-        const authCookie = ctx.cookie?.auth;
-        const accessToken = authCookie?.value ?? authCookie?.toString?.() ?? null;
-        const decoded = (accessToken && accessToken !== 'undefined' && accessToken !== '')
-          ? SessionService.decodeToken(String(accessToken))
-          : null;
-        const currentSessionId = decoded?.sid ?? undefined;
+      // Extract the caller's session ID so it can be preserved during bulk revocation.
+      // This keeps the user logged in on the current device while signing out all others.
+      const authCookie = ctx.cookie?.auth;
+      const accessToken = authCookie?.value ?? authCookie?.toString?.() ?? null;
+      const decoded = (accessToken && accessToken !== 'undefined' && accessToken !== '')
+        ? SessionService.decodeToken(String(accessToken))
+        : null;
+      const currentSessionId = decoded?.sid ?? undefined;
 
-        await AuthService.changePassword(ctx.user.id, ctx.body.currentPassword, ctx.body.newPassword, currentSessionId);
-        return { message: 'Password changed. All other sessions have been signed out.' };
-      } catch (err) {
-        if (err && typeof err === 'object' && 'statusCode' in err) {
-          ctx.set.status = /** @type {any} */ (err).statusCode;
-          return { error: /** @type {any} */ (err).message };
-        }
-        throw err;
-      }
+      await AuthService.changePassword(ctx.user.id, ctx.body.currentPassword, ctx.body.newPassword, currentSessionId);
+      return { message: 'Password changed. All other sessions have been signed out.' };
     },
     {
       body: t.Object({

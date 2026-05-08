@@ -47,6 +47,12 @@ mock.module('@mycelium/shared/redis', () => ({
   isRedisConnected: () => true,
 }));
 
+mock.module('../../src/db.js', () => ({
+  prisma: {
+    activityLog: { create: mock(() => Promise.resolve()) },
+  },
+}));
+
 // Import session module AFTER mocking Redis
 const { destroySession } = await import('../../src/session.js');
 const { register: registerSet } = await import('../../src/tools/set-session-context.js');

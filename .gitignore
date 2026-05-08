@@ -28,8 +28,5 @@ Thumbs.db
 # Logs
 *.log
 
-# Bun
-bun.lock
-
 # Vite
 apps/web/node_modules/.vite/

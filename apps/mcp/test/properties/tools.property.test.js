@@ -201,7 +201,7 @@ describe('Feature: mcp-server, Property 3: Read note round-trip preserves note d
       excerpt: fc.option(fc.string({ maxLength: 100 }), { nil: null }),
       status: arbNoteStatus,
       tags: fc.array(arbTag, { minLength: 0, maxLength: 5 }),
-      updatedAt: fc.date({ min: new Date('2020-01-01'), max: new Date('2030-01-01') }),
+      updatedAt: fc.date({ min: new Date('2020-01-01'), max: new Date('2030-01-01'), noInvalidDate: true }),
     });
 
     await fc.assert(

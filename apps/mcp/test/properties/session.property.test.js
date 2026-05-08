@@ -47,6 +47,12 @@ mock.module('@mycelium/shared/redis', () => ({
   isRedisConnected: () => true,
 }));
 
+mock.module('../../src/db.js', () => ({
+  prisma: {
+    activityLog: { create: mock(() => Promise.resolve()) },
+  },
+}));
+
 const {
   getSessionValue,
   setSessionValue,

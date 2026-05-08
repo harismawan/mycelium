@@ -51,12 +51,19 @@ jobs:
           kubectl apply -k apps/web/k8s -n ${{ env.NAMESPACE }}
           kubectl apply -k apps/mcp/k8s -n ${{ env.NAMESPACE }}
 
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
       - name: Run database migrations
-        run: |
-          echo "Running Prisma migrations..."
-          kubectl delete job mycelium-migrate -n ${{ env.NAMESPACE }} --ignore-not-found
-          kubectl apply -f apps/api/k8s/migration-job.yaml -n ${{ env.NAMESPACE }}
-          kubectl wait --for=condition=complete job/mycelium-migrate -n ${{ env.NAMESPACE }} --timeout=300s
+        working-directory: ./apps/api
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: bunx prisma migrate deploy
 
       - name: Update deployment images
         run: |

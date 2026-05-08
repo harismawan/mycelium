@@ -59,9 +59,9 @@ async function startStdio() {
   process.stdin.on('end', cleanup);
 }
 
-// Cache MCP server instances by apiKeyId — avoids recreating and re-registering
-// all tools on every request for the same API key.
-const serverCache = new Map();
+// NOTE: Do not cache McpServer instances across HTTP requests.
+// An McpServer can only be connected to a single transport instance; reusing it
+// causes "Already connected to a transport" errors on subsequent requests.
 
 /**
  * Start the MCP server with Streamable HTTP transport using Bun.serve.
@@ -93,12 +93,9 @@ async function startHttp() {
       try {
         const auth = await resolveAuth('http', req);
 
-        // Reuse the cached server for this API key to avoid repeated tool registration
-        let server = serverCache.get(auth.apiKeyId);
-        if (!server) {
-          server = createServer(auth);
-          serverCache.set(auth.apiKeyId, server);
-        }
+        // Create a fresh server per request/connection.
+        // Reusing a connected server instance across transports is invalid.
+        const server = createServer(auth);
 
         const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined });
 
@@ -110,9 +107,13 @@ async function startHttp() {
         await server.connect(transport);
         return await transport.handleRequest(req);
       } catch (err) {
-        log('error', 'HTTP connection error', { error: err.message });
-        return new Response(JSON.stringify({ error: err.message }), {
-          status: 401,
+        const message = err?.message || 'Unknown error';
+        const isAuthError =
+          message.includes('Authorization: Bearer <key>') || message.includes('Invalid API key');
+
+        log('error', 'HTTP connection error', { error: message, status: isAuthError ? 401 : 500 });
+        return new Response(JSON.stringify({ error: message }), {
+          status: isAuthError ? 401 : 500,
           headers: { 'Content-Type': 'application/json' },
         });
       }

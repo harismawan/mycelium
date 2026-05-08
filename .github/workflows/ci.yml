@@ -40,6 +40,7 @@ jobs:
         working-directory: ./apps/mcp
         env:
           NODE_ENV: test
+          DATABASE_URL: postgresql://localhost/test
         run: bun test --isolate
 
   build-api:

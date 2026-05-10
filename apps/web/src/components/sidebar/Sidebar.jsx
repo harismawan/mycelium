@@ -125,6 +125,25 @@ const ProfileName = styled.span`
   white-space: nowrap;
 `;
 
+const ViewAllButton = styled.button`
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 4px 8px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  cursor: pointer;
+  text-align: left;
+  transition: color 0.1s ease;
+
+  &:hover {
+    color: var(--color-text-secondary);
+  }
+`;
+
 const PinnedItem = styled.button`
   display: flex;
   align-items: center;
@@ -166,6 +185,7 @@ export default function Sidebar() {
   };
 
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [showAllTags, setShowAllTags] = useState(false);
 
   const activeSection = useUIStore((s) => s.activeSection);
   const setActiveSection = useUIStore((s) => s.setActiveSection);
@@ -206,12 +226,25 @@ export default function Sidebar() {
         <NavLabel>Agent Activity</NavLabel>
       </NavItem>
 
+      {pinnedSlugs.length > 0 && (
+        <>
+          <SectionHeader>
+            <span>Pinned</span>
+          </SectionHeader>
+          {pinnedSlugs.map((slug) => (
+            <PinnedItem key={slug} onClick={() => navigate(`/notes/${slug}`)}>
+              <Pin size={12} style={{ flexShrink: 0 }} /> {slug}
+            </PinnedItem>
+          ))}
+        </>
+      )}
+
       {tags.length > 0 && (
         <>
           <SectionHeader>
             <span>Tags</span>
           </SectionHeader>
-          {tags.map((tag) => {
+          {(showAllTags ? tags : tags.slice(0, 10)).map((tag) => {
             const count = tag._count?.notes ?? tag.noteCount ?? 0;
             return (
               <NavItem
@@ -225,19 +258,11 @@ export default function Sidebar() {
               </NavItem>
             );
           })}
-        </>
-      )}
-
-      {pinnedSlugs.length > 0 && (
-        <>
-          <SectionHeader>
-            <span>Pinned</span>
-          </SectionHeader>
-          {pinnedSlugs.map((slug) => (
-            <PinnedItem key={slug} onClick={() => navigate(`/notes/${slug}`)}>
-              <Pin size={12} style={{ flexShrink: 0 }} /> {slug}
-            </PinnedItem>
-          ))}
+          {tags.length > 10 && (
+            <ViewAllButton onClick={() => setShowAllTags((v) => !v)}>
+              {showAllTags ? 'Show less' : `View all ${tags.length} tags`}
+            </ViewAllButton>
+          )}
         </>
       )}
 

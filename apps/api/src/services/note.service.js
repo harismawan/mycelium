@@ -191,7 +191,7 @@ export const NoteService = {
    * @param {string} userId - ID of the owning user.
    * @param {string} slug - Current note slug.
    * @param {{ title?: string, content?: string, status?: string, tags?: string[], message?: string, authType?: string, apiKeyId?: string, apiKeyName?: string }} data
-   * @returns {Promise<import('@prisma/client').Note>} The updated note.
+   * @returns {Promise<{ note: import('@prisma/client').Note, before: { title: string, status: string, tags: string[], content: string } }>}
    * @throws {{ statusCode: number, message: string }} 404 if not found.
    */
   async updateNote(userId, slug, data) {
@@ -209,6 +209,13 @@ export const NoteService = {
     const tags = data.tags;
     const message = data.message;
     const { authType, apiKeyId, apiKeyName } = data;
+
+    const before = {
+      title: existing.title,
+      status: existing.status,
+      tags: existing.tags.map((t) => t.name),
+      content: existing.content,
+    };
 
     const excerpt = generateExcerpt(content);
     const wikilinks = extractWikilinks(content);
@@ -285,7 +292,7 @@ export const NoteService = {
       return updated;
     });
 
-    return note;
+    return { note, before };
   },
 
   /**

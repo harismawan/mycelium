@@ -661,3 +661,45 @@ describe('NoteService.deleteNote', () => {
     });
   });
 });
+
+describe('NoteService.updateNote — returns before snapshot', () => {
+  test('returns { note, before } with pre-update field values', async () => {
+    const existing = {
+      id: 'note_1',
+      slug: 'my-note',
+      title: 'Old Title',
+      content: 'Old content here',
+      status: 'DRAFT',
+      tags: [{ id: 'tag_1', name: 'old-tag' }],
+    };
+    mockNote.findFirst.mockResolvedValue(existing);
+    mockNote.findMany.mockResolvedValue([]); // no slug collisions
+    mockLink.findMany.mockResolvedValue([]);
+    mockLink.updateMany.mockResolvedValue({ count: 0 });
+
+    const updatedNote = {
+      id: 'note_1',
+      slug: 'new-title',
+      title: 'New Title',
+      content: 'New content here',
+      status: 'PUBLISHED',
+      tags: [{ id: 'tag_2', name: 'new-tag' }],
+      revisions: [],
+    };
+    mockNote.update.mockResolvedValue(updatedNote);
+
+    const result = await NoteService.updateNote('user_1', 'my-note', {
+      title: 'New Title',
+      content: 'New content here',
+      status: 'PUBLISHED',
+      tags: ['new-tag'],
+    });
+
+    expect(result).toHaveProperty('note');
+    expect(result).toHaveProperty('before');
+    expect(result.before.title).toBe('Old Title');
+    expect(result.before.status).toBe('DRAFT');
+    expect(result.before.tags).toEqual(['old-tag']);
+    expect(result.before.content).toBe('Old content here');
+  });
+});

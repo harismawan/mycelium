@@ -557,7 +557,7 @@ describe('NoteService.deleteNote', () => {
 
     expect(mockNote.findFirst).toHaveBeenCalledWith({
       where: { slug: 'my-note', userId },
-      select: { id: true },
+      select: { id: true, title: true },
     });
     // Links from this note deleted
     expect(mockLink.deleteMany).toHaveBeenCalledWith({ where: { fromId: 'note_1' } });
@@ -639,5 +639,25 @@ describe('NoteService.revertNote', () => {
       expect(err.statusCode).toBe(404);
       expect(err.message).toBe('Revision not found');
     }
+  });
+});
+
+describe('NoteService.deleteNote', () => {
+  test('returns the deleted note title', async () => {
+    mockNote.findFirst.mockResolvedValue({ id: 'note_1', title: 'My Note' });
+    // deleteMany and delete are called via $transaction array
+    mockLink.deleteMany.mockResolvedValue({ count: 0 });
+
+    const result = await NoteService.deleteNote('user_1', 'my-note');
+
+    expect(result).toEqual({ title: 'My Note' });
+  });
+
+  test('throws 404 when note not found', async () => {
+    mockNote.findFirst.mockResolvedValue(null);
+
+    await expect(NoteService.deleteNote('user_1', 'ghost')).rejects.toMatchObject({
+      statusCode: 404,
+    });
   });
 });

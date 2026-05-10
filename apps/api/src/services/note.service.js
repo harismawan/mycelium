@@ -371,11 +371,12 @@ export const NoteService = {
    *
    * @param {string} userId
    * @param {string} slug
+   * @returns {Promise<{ title: string }>}
    */
   async deleteNote(userId, slug) {
     const note = await prisma.note.findFirst({
       where: { slug, userId },
-      select: { id: true },
+      select: { id: true, title: true },
     });
     if (!note) {
       throw { statusCode: 404, message: 'Note not found' };
@@ -389,6 +390,8 @@ export const NoteService = {
       prisma.revision.deleteMany({ where: { noteId: note.id } }),
       prisma.note.delete({ where: { id: note.id } }),
     ]);
+
+    return { title: note.title };
   },
 };
 

@@ -293,13 +293,13 @@ export const NoteService = {
    *
    * @param {string} userId - ID of the owning user.
    * @param {string} slug - Note slug.
-   * @returns {Promise<void>}
+   * @returns {Promise<{ id: string, title: string }>}
    * @throws {{ statusCode: number, message: string }} 404 if not found.
    */
   async archiveNote(userId, slug) {
     const note = await prisma.note.findFirst({
       where: { slug, userId },
-      select: { id: true },
+      select: { id: true, title: true },
     });
     if (!note) {
       throw { statusCode: 404, message: 'Note not found' };
@@ -309,6 +309,8 @@ export const NoteService = {
       where: { id: note.id },
       data: { status: 'ARCHIVED' },
     });
+
+    return note;
   },
 
   /**

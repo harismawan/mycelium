@@ -478,14 +478,14 @@ describe('NoteService.updateNote', () => {
 describe('NoteService.archiveNote', () => {
   /** Validates: Requirements 5.7 */
   test('sets status to ARCHIVED (soft delete)', async () => {
-    mockNote.findFirst.mockResolvedValue({ id: 'note_1' });
+    mockNote.findFirst.mockResolvedValue({ id: 'note_1', title: 'My Note' });
     mockNote.update.mockResolvedValue({});
 
     await NoteService.archiveNote(userId, 'my-note');
 
     expect(mockNote.findFirst).toHaveBeenCalledWith({
       where: { slug: 'my-note', userId },
-      select: { id: true },
+      select: { id: true, title: true },
     });
     expect(mockNote.update).toHaveBeenCalledWith({
       where: { id: 'note_1' },
@@ -503,6 +503,23 @@ describe('NoteService.archiveNote', () => {
       expect(err.statusCode).toBe(404);
       expect(err.message).toBe('Note not found');
     }
+  });
+
+  test('returns the archived note title', async () => {
+    mockNote.findFirst.mockResolvedValue({ id: 'note_1', title: 'My Note' });
+    mockNote.update.mockResolvedValue({ id: 'note_1', title: 'My Note', status: 'ARCHIVED' });
+
+    const result = await NoteService.archiveNote('user_1', 'my-note');
+
+    expect(result).toEqual({ id: 'note_1', title: 'My Note' });
+  });
+
+  test('throws 404 when note not found', async () => {
+    mockNote.findFirst.mockResolvedValue(null);
+
+    await expect(NoteService.archiveNote('user_1', 'ghost')).rejects.toMatchObject({
+      statusCode: 404,
+    });
   });
 });
 

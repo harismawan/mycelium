@@ -2,6 +2,7 @@ import Elysia from 'elysia';
 import { AuthService } from '../services/auth.service.js';
 import { SessionService } from '../services/session.service.js';
 import { isRedisConnected } from '@mycelium/shared/redis';
+import { generateCsrfToken, CSRF_COOKIE_OPTIONS } from '../utils/csrf.js';
 
 /**
  * @typedef {Object} AuthContext
@@ -157,6 +158,13 @@ async function attemptRefresh(ctx, refreshToken, oldJti) {
     // Set new access token cookie
     if (ctx.cookie?.auth) {
       ctx.cookie.auth.set({ ...AUTH_COOKIE_OPTIONS, value: result.accessToken });
+    }
+
+    // Rotate CSRF cookie alongside new access token — csrf cookie shares the same
+    // 1-day maxAge as the access token, so it must be refreshed here too, otherwise
+    // silent token refresh leaves the csrf cookie expired and all POST requests fail.
+    if (ctx.cookie?.csrf) {
+      ctx.cookie.csrf.set({ ...CSRF_COOKIE_OPTIONS, value: generateCsrfToken() });
     }
 
     // Fetch user using the new access token

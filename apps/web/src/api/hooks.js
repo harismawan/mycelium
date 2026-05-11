@@ -55,6 +55,7 @@ export const activityKeys = {
  * @param {string} [filters.status]
  * @param {string} [filters.tag]
  * @param {string} [filters.q]
+ * @param {boolean} [filters.pinned]
  */
 export function useNotes(filters = {}) {
   const params = new URLSearchParams();
@@ -63,6 +64,7 @@ export function useNotes(filters = {}) {
   if (filters.status) params.set('status', filters.status);
   if (filters.tag) params.set('tag', filters.tag);
   if (filters.q) params.set('q', filters.q);
+  if (filters.pinned) params.set('pinned', 'true');
   const qs = params.toString();
   return useQuery({
     queryKey: noteKeys.lists(filters),

@@ -119,6 +119,10 @@ export const NoteService = {
       ];
     }
 
+    if (opts.pinned === true) {
+      where.pinned = true;
+    }
+
     const notes = await prisma.note.findMany({
       where,
       take: limit + 1,
@@ -247,6 +251,7 @@ export const NoteService = {
       excerpt,
       frontmatter: Object.keys(frontmatter).length > 0 ? frontmatter : undefined,
       status,
+      ...(data.pinned !== undefined && { pinned: data.pinned }),
     };
 
     // Handle tags: disconnect all existing, then connect-or-create new ones

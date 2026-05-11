@@ -111,14 +111,15 @@ export const noteRoutes = new Elysia({ prefix: '/api/v1/notes' })
   // GET / — list notes with optional filters and cursor pagination
   .get(
     '/',
-    async (/** @type {{ query: { cursor?: string, limit?: string, status?: string, tag?: string, q?: string }, user: { id: string } }} */ ctx) => {
-      const { cursor, limit, status, tag, q } = ctx.query;
+    async (/** @type {{ query: { cursor?: string, limit?: string, status?: string, tag?: string, q?: string, pinned?: string }, user: { id: string } }} */ ctx) => {
+      const { cursor, limit, status, tag, q, pinned } = ctx.query;
       const result = await NoteService.listNotes(ctx.user.id, {
         cursor: cursor || undefined,
         limit: limit ? parseInt(limit, 10) : undefined,
         status: status || undefined,
         tag: tag || undefined,
         q: q || undefined,
+        pinned: pinned === 'true' ? true : undefined,
       });
       return result;
     },
@@ -135,6 +136,7 @@ export const noteRoutes = new Elysia({ prefix: '/api/v1/notes' })
         ),
         tag: t.Optional(t.String()),
         q: t.Optional(t.String()),
+        pinned: t.Optional(t.String()),
       }),
       response: {
         200: PaginatedNotesResponse,
@@ -288,6 +290,7 @@ export const noteRoutes = new Elysia({ prefix: '/api/v1/notes' })
         ),
         tags: t.Optional(t.Array(t.String({ minLength: 1 }))),
         message: t.Optional(t.String()),
+        pinned: t.Optional(t.Boolean()),
       }),
       response: {
         200: NoteResponse,
@@ -296,7 +299,7 @@ export const noteRoutes = new Elysia({ prefix: '/api/v1/notes' })
       },
       detail: {
         summary: 'Update a note',
-        description: 'Partially updates a note by slug. Supports updating title, content, status, tags, and revision message. Creates a revision on content changes. Requires JWT cookie or Bearer API key authentication.',
+        description: 'Partially updates a note by slug. Supports updating title, content, status, tags, pinned, and revision message. Creates a revision on content changes. Requires JWT cookie or Bearer API key authentication.',
         tags: ['Notes'],
         operationId: 'updateNote',
         security: [{ cookieAuth: [] }, { bearerApiKey: [] }],

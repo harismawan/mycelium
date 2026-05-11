@@ -1,6 +1,9 @@
 import { describe, test, expect, mock, beforeEach } from 'bun:test';
 
 const mockPrisma = {
+  directory: {
+    findFirst: mock(() => null),
+  },
   note: {
     findMany: mock(() => []),
     create: mock(() => ({})),
@@ -46,6 +49,7 @@ describe('create_note', () => {
   const auth = { userId: 'u1', scopes: ['notes:write'], apiKeyId: 'ak1', apiKeyName: 'test-key' };
 
   beforeEach(() => {
+    mockPrisma.directory.findFirst.mockReset();
     mockPrisma.note.findMany.mockReset();
     mockPrisma.note.create.mockReset();
     mockPrisma.link.findMany.mockReset();
@@ -105,6 +109,37 @@ describe('create_note', () => {
     const parsed = JSON.parse(result.content[0].text);
     expect(parsed.tags).toEqual(['alpha', 'beta']);
     expect(parsed.status).toBe('PUBLISHED');
+  });
+
+  test('creates note in an owned directory', async () => {
+    mockPrisma.directory.findFirst.mockImplementation(() => ({ id: 'dir1' }));
+    mockPrisma.note.findMany.mockImplementation(() => []);
+    mockPrisma.note.create.mockImplementation(({ data }) => ({
+      id: 'n3',
+      slug: 'directory-note',
+      title: data.title,
+      status: data.status,
+      directoryId: data.directoryId,
+      directory: { id: 'dir1', name: 'Projects', parentId: null },
+      tags: [],
+    }));
+
+    const result = await handler({ title: 'Directory Note', content: 'body', directoryId: 'dir1' });
+    expect(result.isError).toBeUndefined();
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.directoryId).toBe('dir1');
+    expect(parsed.directory).toEqual({ id: 'dir1', name: 'Projects', parentId: null });
+    expect(mockPrisma.note.create.mock.calls[0][0].data.directoryId).toBe('dir1');
+  });
+
+  test('rejects another user directory', async () => {
+    mockPrisma.directory.findFirst.mockImplementation(() => null);
+
+    const result = await handler({ title: 'Bad Directory', content: 'body', directoryId: 'other-dir' });
+    expect(result.isError).toBe(true);
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.error).toBe('Directory not found');
+    expect(mockPrisma.note.create).not.toHaveBeenCalled();
   });
 
   test('handles database error gracefully', async () => {

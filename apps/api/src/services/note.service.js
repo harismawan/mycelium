@@ -23,11 +23,11 @@ export const NoteService = {
    * resolve unresolved links.
    *
    * @param {string} userId - ID of the owning user.
-   * @param {{ title: string, content: string, status?: string, tags?: string[], authType?: string, apiKeyId?: string, apiKeyName?: string }} data
+   * @param {{ title: string, content: string, status?: string, tags?: string[], directoryId?: string | null, authType?: string, apiKeyId?: string, apiKeyName?: string }} data
    * @returns {Promise<import('@prisma/client').Note>} The created note with tags.
    */
   async createNote(userId, data) {
-    const { title, status, tags, authType, apiKeyId, apiKeyName } = data;
+    const { title, status, tags, directoryId, authType, apiKeyId, apiKeyName } = data;
     const content = sanitizeMarkdown(data.content);
     const { frontmatter } = parseFrontmatter(content);
     const excerpt = generateExcerpt(content);
@@ -53,6 +53,16 @@ export const NoteService = {
       create: { name },
     }));
 
+    if (directoryId) {
+      const directory = await prisma.directory.findFirst({
+        where: { id: directoryId, userId },
+        select: { id: true },
+      });
+      if (!directory) {
+        throw { statusCode: 404, message: 'Directory not found' };
+      }
+    }
+
     const note = await prisma.$transaction(async (tx) => {
       const created = await tx.note.create({
         data: {
@@ -63,6 +73,7 @@ export const NoteService = {
           frontmatter: Object.keys(frontmatter).length > 0 ? frontmatter : undefined,
           status: status ?? 'DRAFT',
           userId,
+          directoryId: directoryId ?? null,
           tags: tagOps.length ? { connectOrCreate: tagOps } : undefined,
           revisions: {
             create: {
@@ -73,7 +84,7 @@ export const NoteService = {
             },
           },
         },
-        include: { tags: true, revisions: true },
+        include: { tags: true, revisions: true, directory: { select: { id: true, name: true, parentId: true } } },
       });
 
       // Reconcile links inside the transaction
@@ -92,7 +103,7 @@ export const NoteService = {
    * List notes with cursor-based pagination and optional filters.
    *
    * @param {string} userId - ID of the owning user.
-   * @param {{ cursor?: string, limit?: number, status?: string, tag?: string, q?: string }} opts
+   * @param {{ cursor?: string, limit?: number, status?: string, tag?: string, q?: string, directoryId?: string, unfiled?: boolean, pinned?: boolean }} opts
    * @returns {Promise<{ notes: import('@prisma/client').Note[], nextCursor: string | null }>}
    */
   async listNotes(userId, opts = {}) {
@@ -112,6 +123,12 @@ export const NoteService = {
       where.tags = { some: { name: opts.tag } };
     }
 
+    if (opts.unfiled === true) {
+      where.directoryId = null;
+    } else if (opts.directoryId) {
+      where.directoryId = opts.directoryId;
+    }
+
     if (opts.q) {
       where.OR = [
         { title: { contains: opts.q, mode: 'insensitive' } },
@@ -127,8 +144,8 @@ export const NoteService = {
       where,
       take: limit + 1,
       ...(opts.cursor ? { cursor: { id: opts.cursor }, skip: 1 } : {}),
-      orderBy: { createdAt: 'desc' },
-      include: { tags: true },
+      orderBy: [{ pinned: 'desc' }, { updatedAt: 'desc' }, { id: 'asc' }],
+      include: { tags: true, directory: { select: { id: true, name: true, parentId: true } } },
     });
 
     const hasMore = notes.length > limit;
@@ -166,7 +183,7 @@ export const NoteService = {
   async getNote(userId, slug) {
     return prisma.note.findFirst({
       where: { slug, userId },
-      include: { tags: true },
+      include: { tags: true, directory: { select: { id: true, name: true, parentId: true } } },
     });
   },
 
@@ -194,7 +211,7 @@ export const NoteService = {
    *
    * @param {string} userId - ID of the owning user.
    * @param {string} slug - Current note slug.
-   * @param {{ title?: string, content?: string, status?: string, tags?: string[], message?: string, authType?: string, apiKeyId?: string, apiKeyName?: string }} data
+   * @param {{ title?: string, content?: string, status?: string, tags?: string[], directoryId?: string | null, message?: string, pinned?: boolean, authType?: string, apiKeyId?: string, apiKeyName?: string }} data
    * @returns {Promise<{ note: import('@prisma/client').Note, before: { title: string, status: string, tags: string[], content: string } }>}
    * @throws {{ statusCode: number, message: string }} 404 if not found.
    */
@@ -213,6 +230,16 @@ export const NoteService = {
     const tags = data.tags;
     const message = data.message;
     const { authType, apiKeyId, apiKeyName } = data;
+
+    if (data.directoryId) {
+      const directory = await prisma.directory.findFirst({
+        where: { id: data.directoryId, userId },
+        select: { id: true },
+      });
+      if (!directory) {
+        throw { statusCode: 404, message: 'Directory not found' };
+      }
+    }
 
     const before = {
       title: existing.title,
@@ -252,6 +279,7 @@ export const NoteService = {
       frontmatter: Object.keys(frontmatter).length > 0 ? frontmatter : undefined,
       status,
       ...(data.pinned !== undefined && { pinned: data.pinned }),
+      ...(Object.hasOwn(data, 'directoryId') && { directoryId: data.directoryId }),
     };
 
     // Handle tags: disconnect all existing, then connect-or-create new ones
@@ -285,7 +313,7 @@ export const NoteService = {
             },
           } : {}),
         },
-        include: { tags: true, revisions: true },
+        include: { tags: true, revisions: true, directory: { select: { id: true, name: true, parentId: true } } },
       });
 
       // Reconcile links

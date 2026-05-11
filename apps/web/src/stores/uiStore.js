@@ -9,10 +9,12 @@ import { persist } from 'zustand/middleware';
  * @typedef {object} UIState
  * @property {Theme} theme
  * @property {boolean} sidebarOpen
+ * @property {boolean} sidebarMinimized
  * @property {boolean} rightPaneOpen
  * @property {boolean} readingMode
  * @property {(theme: Theme) => void} setTheme
  * @property {() => void} toggleSidebar
+ * @property {() => void} toggleSidebarMinimized
  * @property {() => void} toggleRightPane
  */
 
@@ -26,6 +28,7 @@ export const useUIStore = create(
       /** @type {'all' | 'archive' | 'graph' | string} Active sidebar section */
       activeSection: 'all',
       sidebarOpen: true,
+      sidebarMinimized: false,
       rightPaneOpen: true,
       readingMode: false,
 
@@ -43,6 +46,9 @@ export const useUIStore = create(
 
       /** Toggle sidebar visibility. */
       toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
+
+      /** Toggle compact icon-only sidebar mode. */
+      toggleSidebarMinimized: () => set((state) => ({ sidebarMinimized: !state.sidebarMinimized })),
 
       /** Toggle right pane visibility. */
       toggleRightPane: () => set((state) => ({ rightPaneOpen: !state.rightPaneOpen })),

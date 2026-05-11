@@ -1,6 +1,9 @@
 import { describe, test, expect, mock, beforeEach } from 'bun:test';
 
 const mockPrisma = {
+  directory: {
+    findFirst: mock(() => null),
+  },
   note: {
     findFirst: mock(() => null),
     findMany: mock(() => []),
@@ -47,6 +50,7 @@ describe('update_note', () => {
   const auth = { userId: 'u1', scopes: ['notes:write'], apiKeyId: 'ak1', apiKeyName: 'test-key' };
 
   beforeEach(() => {
+    mockPrisma.directory.findFirst.mockReset();
     mockPrisma.note.findFirst.mockReset();
     mockPrisma.note.findMany.mockReset();
     mockPrisma.note.update.mockReset();
@@ -88,6 +92,57 @@ describe('update_note', () => {
     expect(parsed.title).toBe('My Note');
     expect(parsed.status).toBe('PUBLISHED');
     expect(parsed.tags).toEqual(['new-tag']);
+  });
+
+  test('moves note into a directory and back to unfiled', async () => {
+    mockPrisma.note.findFirst.mockImplementation(() => ({
+      id: 'n1',
+      slug: 'my-note',
+      title: 'My Note',
+      content: 'Old content',
+      status: 'DRAFT',
+      directoryId: null,
+      tags: [],
+    }));
+    mockPrisma.directory.findFirst.mockImplementation(() => ({ id: 'dir1' }));
+    mockPrisma.note.update.mockImplementation(({ data }) => ({
+      id: 'n1',
+      slug: 'my-note',
+      title: data.title,
+      content: data.content,
+      status: data.status,
+      directoryId: data.directoryId,
+      directory: data.directoryId ? { id: data.directoryId, name: 'Projects', parentId: null } : null,
+      tags: [],
+    }));
+
+    const moved = await handler({ slug: 'my-note', directoryId: 'dir1' });
+    expect(moved.isError).toBeUndefined();
+    expect(JSON.parse(moved.content[0].text).directoryId).toBe('dir1');
+    expect(mockPrisma.note.update.mock.calls[0][0].data.directoryId).toBe('dir1');
+
+    const cleared = await handler({ slug: 'my-note', directoryId: null });
+    expect(cleared.isError).toBeUndefined();
+    expect(JSON.parse(cleared.content[0].text).directoryId).toBeNull();
+    expect(mockPrisma.note.update.mock.calls[1][0].data.directoryId).toBeNull();
+  });
+
+  test('rejects assigning note to another user directory', async () => {
+    mockPrisma.note.findFirst.mockImplementation(() => ({
+      id: 'n1',
+      slug: 'my-note',
+      title: 'My Note',
+      content: 'Old content',
+      status: 'DRAFT',
+      tags: [],
+    }));
+    mockPrisma.directory.findFirst.mockImplementation(() => null);
+
+    const result = await handler({ slug: 'my-note', directoryId: 'other-dir' });
+    expect(result.isError).toBe(true);
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.error).toBe('Directory not found');
+    expect(mockPrisma.note.update).not.toHaveBeenCalled();
   });
 
   test('returns not-found error for missing note', async () => {

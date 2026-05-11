@@ -24,6 +24,7 @@ model User {
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
   notes        Note[]
+  directories  Directory[]
   apiKeys      ApiKey[]
   activityLogs ActivityLog[]
 
@@ -43,7 +44,9 @@ model Note {
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
   userId      String
+  directoryId String?
   user        User       @relation(fields: [userId], references: [id])
+  directory   Directory? @relation(fields: [directoryId], references: [id], onDelete: SetNull)
   outLinks    Link[]     @relation("FromNote")
   inLinks     Link[]     @relation("ToNote")
   tags        Tag[]
@@ -52,7 +55,26 @@ model Note {
   @@index([slug])
   @@index([status])
   @@index([userId])
+  @@index([userId, directoryId])
   @@index([userId, status, createdAt])
+}
+
+model Directory {
+  id        String      @id @default(cuid())
+  name      String
+  parentId  String?
+  userId    String
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parent    Directory?  @relation("DirectoryTree", fields: [parentId], references: [id], onDelete: Restrict)
+  children  Directory[] @relation("DirectoryTree")
+  notes     Note[]
+
+  @@index([userId])
+  @@index([parentId])
+  @@index([userId, parentId])
+  @@unique([userId, parentId, name])
 }
 
 model Link {

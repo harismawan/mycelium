@@ -16,13 +16,14 @@ const Shell = styled.div`
 `;
 
 const NavColumn = styled.aside`
-  width: var(--sidebar-width);
-  min-width: var(--sidebar-width);
+  width: ${(props) => (props.$minimized ? '52px' : 'var(--sidebar-width)')};
+  min-width: ${(props) => (props.$minimized ? '52px' : 'var(--sidebar-width)')};
   background-color: var(--color-bg-surface);
   border-right: 1px solid var(--color-border);
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  transition: width 0.16s ease, min-width 0.16s ease;
 `;
 
 const NoteListColumn = styled.aside`
@@ -62,6 +63,7 @@ const RightColumn = styled.aside`
  */
 export default function AppLayout() {
   const sidebarOpen = useUIStore((s) => s.sidebarOpen);
+  const sidebarMinimized = useUIStore((s) => s.sidebarMinimized);
   const rightPaneOpen = useUIStore((s) => s.rightPaneOpen);
   const location = useLocation();
   const isGraphPage = location.pathname === '/graph';
@@ -75,7 +77,7 @@ export default function AppLayout() {
       <CommandPalette />
 
       {sidebarOpen && (
-        <NavColumn aria-label="Navigation sidebar">
+        <NavColumn $minimized={sidebarMinimized} aria-label="Navigation sidebar">
           <Sidebar />
         </NavColumn>
       )}

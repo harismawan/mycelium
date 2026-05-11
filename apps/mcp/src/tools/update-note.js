@@ -4,6 +4,7 @@ import { checkScopes } from "../auth.js";
 import { log } from "../logger.js";
 import { logMcpAction } from "../activity-log.js";
 import { prisma } from "../db.js";
+import { businessError, ensureDirectory, handleDirectoryError, toDirectorySummary } from "../directories.js";
 import { reconcileLinks, resolveUnresolvedLinks } from "../links.js";
 
 /**
@@ -26,6 +27,7 @@ export function register(server, auth) {
       content: z.string().optional(),
       status: z.enum(["DRAFT", "PUBLISHED", "ARCHIVED"]).optional(),
       tags: z.array(z.string()).optional(),
+      directoryId: z.string().nullable().optional(),
       message: z.string().optional(),
     },
     async ({
@@ -34,6 +36,7 @@ export function register(server, auth) {
       content: newContent,
       status: newStatus,
       tags,
+      directoryId,
       message,
     }) => {
       const scopeError = checkScopes(["notes:write"], auth.scopes);
@@ -76,6 +79,9 @@ export function register(server, auth) {
         const title = newTitle ?? existing.title;
         const content = newContent ?? existing.content;
         const status = newStatus ?? existing.status;
+        if (directoryId !== undefined) {
+          await ensureDirectory(auth.userId, directoryId);
+        }
 
         const excerpt = generateExcerpt(content);
         const wikilinks = extractWikilinks(content);
@@ -105,6 +111,10 @@ export function register(server, auth) {
           excerpt,
           status,
         };
+
+        if (directoryId !== undefined) {
+          updateData.directoryId = directoryId;
+        }
 
         // Handle tags: disconnect all existing, then connect-or-create new ones
         if (tags !== undefined) {
@@ -138,7 +148,7 @@ export function register(server, auth) {
                   }
                 : {}),
             },
-            include: { tags: true },
+            include: { tags: true, directory: { select: { id: true, name: true, parentId: true } } },
           });
 
           await reconcileLinks(tx, updated.id, wikilinks, auth.userId);
@@ -152,6 +162,8 @@ export function register(server, auth) {
           slug: note.slug,
           title: note.title,
           status: note.status,
+          directoryId: note.directoryId,
+          directory: toDirectorySummary(note.directory),
           tags: note.tags.map((t) => t.name),
         };
 
@@ -188,19 +200,8 @@ export function register(server, auth) {
           success: false,
           error: err.message,
         });
-        return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify({
-                error: "Database error",
-                message: err.message,
-                isRetryable: true,
-              }),
-            },
-          ],
-          isError: true,
-        };
+        if (err.code === "DIRECTORY_NOT_FOUND") return businessError("Directory not found");
+        return handleDirectoryError(err);
       }
     },
   );

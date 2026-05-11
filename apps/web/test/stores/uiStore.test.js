@@ -5,6 +5,7 @@ beforeEach(() => {
   useUIStore.setState({
     theme: 'light',
     sidebarOpen: true,
+    sidebarMinimized: false,
     rightPaneOpen: true,
     readingMode: false,
   });
@@ -15,6 +16,7 @@ describe('useUIStore', () => {
     const state = useUIStore.getState();
     expect(state.theme).toBe('light');
     expect(state.sidebarOpen).toBe(true);
+    expect(state.sidebarMinimized).toBe(false);
     expect(state.rightPaneOpen).toBe(true);
     expect(state.readingMode).toBe(false);
   });
@@ -30,5 +32,13 @@ describe('useUIStore', () => {
 
     useUIStore.getState().toggleSidebar();
     expect(useUIStore.getState().sidebarOpen).toBe(true);
+  });
+
+  test('toggleSidebarMinimized() flips sidebarMinimized', () => {
+    useUIStore.getState().toggleSidebarMinimized();
+    expect(useUIStore.getState().sidebarMinimized).toBe(true);
+
+    useUIStore.getState().toggleSidebarMinimized();
+    expect(useUIStore.getState().sidebarMinimized).toBe(false);
   });
 });

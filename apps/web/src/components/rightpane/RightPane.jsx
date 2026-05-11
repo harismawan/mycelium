@@ -1,9 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
 import styled from 'styled-components';
-import { X, ChevronDown } from 'lucide-react';
+import { X, ChevronDown, Folder } from 'lucide-react';
 import { useNotesStore } from '../../stores/notesStore.js';
 import { useUIStore } from '../../stores/uiStore.js';
-import { useNote, useUpdateNote } from '../../api/hooks.js';
+import { useDirectories, useNote, useUpdateNote } from '../../api/hooks.js';
 import OutgoingLinks from './OutgoingLinks.jsx';
 import BacklinksList from './BacklinksList.jsx';
 import TagList from './TagList.jsx';
@@ -113,6 +113,166 @@ const DropdownItem = styled.button`
   &:hover { background: var(--color-bg-hover); }
 `;
 
+const DirectoryTrigger = styled.button`
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 148px;
+  max-width: 188px;
+  padding: 6px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-bg-surface);
+  color: var(--color-text);
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+
+  &:hover {
+    background: var(--color-bg-hover);
+  }
+`;
+
+const DirectoryTriggerLabel = styled.span`
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+`;
+
+const DirectoryName = styled.span`
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+`;
+
+const DirectoryMenu = styled(DropdownMenu)`
+  min-width: 238px;
+  max-width: 280px;
+  max-height: 320px;
+  padding: 6px;
+  border-radius: 8px;
+  overflow-y: auto;
+`;
+
+const DirectoryOption = styled.button`
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 32px;
+  padding: 7px 10px 7px ${(p) => `${10 + p.$depth * 18}px`};
+  border: none;
+  border-radius: 6px;
+  background: ${(p) => (p.$active ? 'var(--color-bg-active)' : 'transparent')};
+  color: ${(p) => (p.$active ? 'var(--color-text)' : 'var(--color-text-secondary)')};
+  font-size: 13px;
+  font-weight: ${(p) => (p.$active ? '600' : '400')};
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 0.1s ease, color 0.1s ease;
+
+  &::before {
+    content: ${(p) => (p.$depth > 0 ? "''" : 'none')};
+    position: absolute;
+    left: ${(p) => `${16 + (p.$depth - 1) * 18}px`};
+    top: 0;
+    bottom: 50%;
+    border-left: 1px solid var(--color-border);
+  }
+
+  &::after {
+    content: ${(p) => (p.$depth > 0 ? "''" : 'none')};
+    position: absolute;
+    left: ${(p) => `${16 + (p.$depth - 1) * 18}px`};
+    top: 50%;
+    width: 12px;
+    border-top: 1px solid var(--color-border);
+  }
+
+  &:hover {
+    background: var(--color-bg-hover);
+    color: var(--color-text);
+  }
+`;
+
+function flattenDirectories(directories, depth = 0) {
+  return directories.flatMap((directory) => [
+    { ...directory, depth },
+    ...flattenDirectories(directory.children ?? [], depth + 1),
+  ]);
+}
+
+function DirectorySelector({ note, updateNote }) {
+  const { data } = useDirectories();
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  const directories = flattenDirectories(data?.directories ?? []);
+
+  useEffect(() => {
+    const handler = (event) => {
+      if (ref.current && !ref.current.contains(event.target)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const handleDirectoryChange = (directoryId) => {
+    setOpen(false);
+    if ((note?.directoryId ?? null) !== directoryId) {
+      updateNote.mutate({ directoryId });
+    }
+  };
+
+  return (
+    <DropdownWrapper ref={ref}>
+      <DirectoryTrigger
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        aria-label="Change directory"
+        aria-expanded={open}
+      >
+        <DirectoryTriggerLabel>
+          <Folder size={13} />
+          <DirectoryName>{note?.directory?.name ?? 'Unfiled'}</DirectoryName>
+        </DirectoryTriggerLabel>
+        <ChevronDown size={12} />
+      </DirectoryTrigger>
+      {open && (
+        <DirectoryMenu>
+          <DirectoryOption
+            type="button"
+            $active={!note?.directoryId}
+            $depth={0}
+            onClick={() => handleDirectoryChange(null)}
+          >
+            <Folder size={13} />
+            <DirectoryName>Unfiled</DirectoryName>
+          </DirectoryOption>
+          {directories.map((directory) => (
+            <DirectoryOption
+              key={directory.id}
+              type="button"
+              $active={note?.directoryId === directory.id}
+              $depth={directory.depth}
+              onClick={() => handleDirectoryChange(directory.id)}
+            >
+              <Folder size={13} />
+              <DirectoryName>{directory.name}</DirectoryName>
+            </DirectoryOption>
+          ))}
+        </DirectoryMenu>
+      )}
+    </DropdownWrapper>
+  );
+}
+
 /**
  * Estimate word count from content string.
  * @param {string} content
@@ -215,6 +375,10 @@ export default function RightPane() {
                   </DropdownMenu>
                 )}
               </DropdownWrapper>
+            </Row>
+            <Row>
+              <PropLabel>Directory</PropLabel>
+              <DirectorySelector note={note ?? null} updateNote={updateNote} />
             </Row>
           </PaneSection>
 

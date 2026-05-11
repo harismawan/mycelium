@@ -155,7 +155,7 @@ export const AgentService = {
       },
       take: limit + 1,
       ...(opts.cursor ? { cursor: { id: opts.cursor }, skip: 1 } : {}),
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ pinned: 'desc' }, { updatedAt: 'desc' }, { id: 'asc' }],
     });
 
     const hasMore = notes.length > limit;

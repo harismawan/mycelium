@@ -9,6 +9,10 @@ import { register as registerGetOutgoingLinks } from './tools/get-outgoing-links
 import { register as registerGetGraph } from './tools/get-graph.js';
 import { register as registerCreateNote } from './tools/create-note.js';
 import { register as registerUpdateNote } from './tools/update-note.js';
+import { register as registerListDirectories } from './tools/list-directories.js';
+import { register as registerCreateDirectory } from './tools/create-directory.js';
+import { register as registerUpdateDirectory } from './tools/update-directory.js';
+import { register as registerDeleteDirectory } from './tools/delete-directory.js';
 import { register as registerGetContext } from './tools/get-context.js';
 import { register as registerSaveMemory } from './tools/save-memory.js';
 import { register as registerSetSessionContext } from './tools/set-session-context.js';
@@ -40,6 +44,12 @@ export function createServer(authContext) {
   // Write tools
   registerCreateNote(server, authContext);
   registerUpdateNote(server, authContext);
+
+  // Directory tools
+  registerListDirectories(server, authContext);
+  registerCreateDirectory(server, authContext);
+  registerUpdateDirectory(server, authContext);
+  registerDeleteDirectory(server, authContext);
 
   // OpenClaw convenience tools
   registerGetContext(server, authContext);

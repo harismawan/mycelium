@@ -4,6 +4,7 @@ import { checkScopes } from "../auth.js";
 import { log } from "../logger.js";
 import { logMcpAction } from "../activity-log.js";
 import { prisma } from "../db.js";
+import { findOrCreateMemoriesDirectory } from "../directories.js";
 import { reconcileLinks, resolveUnresolvedLinks } from "../links.js";
 
 /**
@@ -57,6 +58,7 @@ export function register(server, auth) {
         }));
 
         const note = await prisma.$transaction(async (tx) => {
+          const memoriesDirectory = await findOrCreateMemoriesDirectory(auth.userId, tx);
           const created = await tx.note.create({
             data: {
               title,
@@ -65,6 +67,7 @@ export function register(server, auth) {
               excerpt,
               status: "PUBLISHED",
               userId: auth.userId,
+              directoryId: memoriesDirectory.id,
               tags: { connectOrCreate: tagOps },
               revisions: {
                 create: { content },

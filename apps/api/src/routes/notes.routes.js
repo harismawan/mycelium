@@ -36,7 +36,7 @@ export const noteRoutes = new Elysia({ prefix: '/api/v1/notes' })
   // POST / — create a new note
   .post(
     '/',
-    async (/** @type {{ body: { title: string, content: string, status?: string, tags?: string[] }, user: { id: string }, authType: string, apiKeyId: string|null, apiKeyName: string|null, set: any }} */ ctx) => {
+    async (/** @type {{ body: { title: string, content: string, status?: string, tags?: string[], directoryId?: string | null }, user: { id: string }, authType: string, apiKeyId: string|null, apiKeyName: string|null, set: any }} */ ctx) => {
       const note = await NoteService.createNote(ctx.user.id, {
         ...ctx.body,
         authType: ctx.authType,
@@ -72,6 +72,7 @@ export const noteRoutes = new Elysia({ prefix: '/api/v1/notes' })
           ]),
         ),
         tags: t.Optional(t.Array(t.String({ minLength: 1 }))),
+        directoryId: t.Optional(t.Union([t.String({ minLength: 1 }), t.Null()])),
       }),
       response: {
         201: NoteResponse,
@@ -111,8 +112,8 @@ export const noteRoutes = new Elysia({ prefix: '/api/v1/notes' })
   // GET / — list notes with optional filters and cursor pagination
   .get(
     '/',
-    async (/** @type {{ query: { cursor?: string, limit?: string, status?: string, tag?: string, q?: string, pinned?: string }, user: { id: string } }} */ ctx) => {
-      const { cursor, limit, status, tag, q, pinned } = ctx.query;
+    async (/** @type {{ query: { cursor?: string, limit?: string, status?: string, tag?: string, q?: string, pinned?: string, directoryId?: string, unfiled?: string }, user: { id: string } }} */ ctx) => {
+      const { cursor, limit, status, tag, q, pinned, directoryId, unfiled } = ctx.query;
       const result = await NoteService.listNotes(ctx.user.id, {
         cursor: cursor || undefined,
         limit: limit ? parseInt(limit, 10) : undefined,
@@ -120,6 +121,8 @@ export const noteRoutes = new Elysia({ prefix: '/api/v1/notes' })
         tag: tag || undefined,
         q: q || undefined,
         pinned: pinned === 'true' ? true : undefined,
+        directoryId: directoryId || undefined,
+        unfiled: unfiled === 'true',
       });
       return result;
     },
@@ -137,6 +140,8 @@ export const noteRoutes = new Elysia({ prefix: '/api/v1/notes' })
         tag: t.Optional(t.String()),
         q: t.Optional(t.String()),
         pinned: t.Optional(t.String()),
+        directoryId: t.Optional(t.String()),
+        unfiled: t.Optional(t.String()),
       }),
       response: {
         200: PaginatedNotesResponse,
@@ -233,7 +238,7 @@ export const noteRoutes = new Elysia({ prefix: '/api/v1/notes' })
   // PATCH /:slug — partial update
   .patch(
     '/:slug',
-    async (/** @type {{ params: { slug: string }, body: { title?: string, content?: string, status?: string, tags?: string[], message?: string }, user: { id: string }, authType: string, apiKeyId: string|null, apiKeyName: string|null, set: any }} */ ctx) => {
+    async (/** @type {{ params: { slug: string }, body: { title?: string, content?: string, status?: string, tags?: string[], directoryId?: string | null, message?: string, pinned?: boolean }, user: { id: string }, authType: string, apiKeyId: string|null, apiKeyName: string|null, set: any }} */ ctx) => {
       const { note, before } = await NoteService.updateNote(ctx.user.id, ctx.params.slug, {
         ...ctx.body,
         authType: ctx.authType,
@@ -289,6 +294,7 @@ export const noteRoutes = new Elysia({ prefix: '/api/v1/notes' })
           ]),
         ),
         tags: t.Optional(t.Array(t.String({ minLength: 1 }))),
+        directoryId: t.Optional(t.Union([t.String({ minLength: 1 }), t.Null()])),
         message: t.Optional(t.String()),
         pinned: t.Optional(t.Boolean()),
       }),

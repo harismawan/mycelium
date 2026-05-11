@@ -266,6 +266,19 @@ describe('AgentService.listAgentNotes', () => {
     expect(findCall.skip).toBe(1);
   });
 
+  test('sorts pinned notes first, then by most recently updated', async () => {
+    mockNote.findMany.mockResolvedValue([]);
+
+    await AgentService.listAgentNotes(userId);
+
+    const findCall = mockNote.findMany.mock.calls[0][0];
+    expect(findCall.orderBy).toEqual([
+      { pinned: 'desc' },
+      { updatedAt: 'desc' },
+      { id: 'asc' },
+    ]);
+  });
+
   test('uses default page limit when none provided', async () => {
     mockNote.findMany.mockResolvedValue([]);
 

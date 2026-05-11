@@ -1,8 +1,8 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import styled from 'styled-components';
-import { Search, Plus, Archive, Trash2, RotateCcw } from 'lucide-react';
-import { useNotes, useCreateNote, tagKeys } from '../api/hooks.js';
+import { Search, Plus, Archive, Trash2, RotateCcw, Pin } from 'lucide-react';
+import { useNotes, useCreateNote, directoryKeys, tagKeys } from '../api/hooks.js';
 import { apiDelete, apiPatch } from '../api/client.js';
 import { useQueryClient } from '@tanstack/react-query';
 import ConfirmDialog from './ConfirmDialog.jsx';
@@ -118,13 +118,26 @@ const HoverBtn = styled.button`
 `;
 
 const NoteTitle = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 5px;
   font-size: 13px;
   font-weight: 600;
   color: var(--color-text);
   margin-bottom: 4px;
+  min-width: 0;
+`;
+
+const NoteTitleText = styled.span`
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
+`;
+
+const PinnedIcon = styled(Pin)`
+  flex-shrink: 0;
+  color: var(--color-text-muted);
 `;
 
 const NoteTitleInput = styled.input`
@@ -185,6 +198,8 @@ const BulkBtn = styled.button`
     background: var(--color-bg-hover);
   }
 `;
+
+const NOTE_DRAG_MIME = 'application/x-mycelium-note-slug';
 
 /**
  * Format a relative time string like "12m ago", "3h ago", "2d ago".
@@ -248,10 +263,11 @@ export default function NoteListPanel() {
     try {
       await apiDelete(`/notes/${slug}`);
       qc.invalidateQueries({ queryKey: ['notes'] });
+      qc.invalidateQueries({ queryKey: directoryKeys.all });
       qc.invalidateQueries({ queryKey: tagKeys.all });
       if (selectedSlug === slug) {
         useNotesStore.getState().selectNote(null);
-        if (!statusFilter && !tagFilter) navigate('/');
+        if (!statusFilter && !tagFilter && !directoryFilter && !unfiledFilter) navigate('/');
       }
     } catch { /* ignore */ }
   };
@@ -267,10 +283,11 @@ export default function NoteListPanel() {
     try {
       await apiDelete(`/notes/${slug}/permanent`);
       qc.invalidateQueries({ queryKey: ['notes'] });
+      qc.invalidateQueries({ queryKey: directoryKeys.all });
       qc.invalidateQueries({ queryKey: tagKeys.all });
       if (selectedSlug === slug) {
         useNotesStore.getState().selectNote(null);
-        if (!statusFilter && !tagFilter) navigate('/');
+        if (!statusFilter && !tagFilter && !directoryFilter && !unfiledFilter) navigate('/');
       }
     } catch { /* ignore */ }
   };
@@ -279,6 +296,7 @@ export default function NoteListPanel() {
     try {
       await apiPatch(`/notes/${slug}`, { status: 'DRAFT' });
       qc.invalidateQueries({ queryKey: ['notes'] });
+      qc.invalidateQueries({ queryKey: directoryKeys.all });
       qc.invalidateQueries({ queryKey: tagKeys.all });
     } catch { /* ignore */ }
   };
@@ -360,6 +378,12 @@ export default function NoteListPanel() {
     navigate(`/notes/${note.slug}`);
   };
 
+  const handleNoteDragStart = (event, note) => {
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData(NOTE_DRAG_MIME, note.slug);
+    event.dataTransfer.setData('text/plain', note.slug);
+  };
+
   const confirmBulkAction = async () => {
     if (!bulkAction || selectedSlugs.size === 0) return;
     const slugs = [...selectedSlugs];
@@ -371,6 +395,7 @@ export default function NoteListPanel() {
         await Promise.all(slugs.map((s) => apiDelete(`/notes/${s}/permanent`)));
       }
       qc.invalidateQueries({ queryKey: ['notes'] });
+      qc.invalidateQueries({ queryKey: directoryKeys.all });
       qc.invalidateQueries({ queryKey: tagKeys.all });
       setSelectedSlugs(new Set());
     } catch { /* ignore */ }
@@ -380,22 +405,30 @@ export default function NoteListPanel() {
   const params = new URLSearchParams(location.search);
   const urlStatus = params.get('status') ?? undefined;
   const urlTag = params.get('tag') ?? undefined;
+  const urlDirectoryId = params.get('directoryId') ?? undefined;
+  const urlUnfiled = params.get('unfiled') === 'true';
 
   const [statusFilter, setStatusFilter] = useState(urlStatus);
   const [tagFilter, setTagFilter] = useState(urlTag);
+  const [directoryFilter, setDirectoryFilter] = useState(urlDirectoryId);
+  const [unfiledFilter, setUnfiledFilter] = useState(urlUnfiled);
 
   // Update filters when URL changes (sidebar nav clicks)
   useEffect(() => {
     if (location.pathname === '/') {
       setStatusFilter(urlStatus);
       setTagFilter(urlTag);
+      setDirectoryFilter(urlDirectoryId);
+      setUnfiledFilter(urlUnfiled);
     }
-  }, [location.pathname, urlStatus, urlTag]);
+  }, [location.pathname, urlStatus, urlTag, urlDirectoryId, urlUnfiled]);
 
   const { data, isLoading } = useNotes({
     limit: 50,
     status: statusFilter,
     tag: tagFilter,
+    directoryId: directoryFilter,
+    unfiled: unfiledFilter,
     q: searchQuery.trim() || undefined,
   });
 
@@ -404,14 +437,16 @@ export default function NoteListPanel() {
   /** Determine the header title based on active filters */
   const headerTitle = useMemo(() => {
     if (tagFilter) return `# ${tagFilter}`;
+    if (unfiledFilter) return 'Unfiled';
+    if (directoryFilter) return 'Directory';
     if (statusFilter === 'ARCHIVED') return 'Archive';
     return 'All Notes';
-  }, [statusFilter, tagFilter]);
+  }, [statusFilter, tagFilter, directoryFilter, unfiledFilter]);
 
   /** Create a new note and navigate to it */
   const handleNewNote = () => {
     createNote.mutate(
-      { title: 'Untitled', content: '' },
+      { title: 'Untitled', content: '', ...(directoryFilter ? { directoryId: directoryFilter } : {}) },
       {
         onSuccess: (note) => {
           if (note?.slug) navigate(`/notes/${note.slug}`);
@@ -481,6 +516,8 @@ export default function NoteListPanel() {
               $active={selectedSlug === note.slug}
               $selected={selectedSlugs.has(note.slug)}
               onClick={(e) => handleCardClick(e, note, index)}
+              draggable={editingSlug !== note.slug}
+              onDragStart={(e) => handleNoteDragStart(e, note)}
             >
               {note.status === 'ARCHIVED' && (
                 <HoverBtn
@@ -519,7 +556,8 @@ export default function NoteListPanel() {
                 />
               ) : (
                 <NoteTitle onDoubleClick={(e) => handleTitleDoubleClick(e, note.slug, note.title)}>
-                  {note.title}
+                  {note.pinned && <PinnedIcon size={12} aria-label="Pinned note" />}
+                  <NoteTitleText>{note.title}</NoteTitleText>
                 </NoteTitle>
               )}
               {note.excerpt && <NoteExcerpt>{note.excerpt}</NoteExcerpt>}

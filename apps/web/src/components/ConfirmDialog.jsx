@@ -58,9 +58,9 @@ const ConfirmBtn = styled(PrimaryButton)`
 `;
 
 /**
- * @param {{ title: string, message: string, confirmLabel?: string, onConfirm: () => void, onCancel: () => void }} props
+ * @param {{ title: string, message: string, confirmLabel?: string, hideConfirm?: boolean, onConfirm: () => void, onCancel: () => void }} props
  */
-export default function ConfirmDialog({ title, message, confirmLabel = 'Confirm', onConfirm, onCancel }) {
+export default function ConfirmDialog({ title, message, confirmLabel = 'Confirm', hideConfirm = false, onConfirm, onCancel }) {
   return (
     <Overlay onClick={onCancel}>
       <Dialog onClick={(e) => e.stopPropagation()}>
@@ -71,7 +71,7 @@ export default function ConfirmDialog({ title, message, confirmLabel = 'Confirm'
         <Message>{message}</Message>
         <Buttons>
           <GhostButton onClick={onCancel}>Cancel</GhostButton>
-          <ConfirmBtn onClick={onConfirm}>{confirmLabel}</ConfirmBtn>
+          {!hideConfirm && <ConfirmBtn onClick={onConfirm}>{confirmLabel}</ConfirmBtn>}
         </Buttons>
       </Dialog>
     </Overlay>

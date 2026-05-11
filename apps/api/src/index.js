@@ -9,6 +9,7 @@ import { authRoutes } from './routes/auth.routes.js';
 import { apiKeyRoutes } from './routes/api-keys.routes.js';
 import { noteRoutes } from './routes/notes.routes.js';
 import { tagRoutes } from './routes/tags.routes.js';
+import { directoryRoutes } from './routes/directory.routes.js';
 import { graphRoutes } from './routes/graph.routes.js';
 import { agentRoutes } from './routes/agent.routes.js';
 import { activityLogRoutes } from './routes/activity-log.routes.js';
@@ -79,6 +80,7 @@ if (shouldEnableSwagger) {
           { name: 'Auth', description: 'User registration, login, logout, and session management' },
           { name: 'Notes', description: 'CRUD operations for knowledge base notes' },
           { name: 'Tags', description: 'Tag listing and tag-based note filtering' },
+          { name: 'Directories', description: 'Nested note directory organization' },
           { name: 'Graph', description: 'Knowledge graph and link traversal' },
           { name: 'Agent', description: 'Machine-friendly endpoints for AI agent consumption' },
           { name: 'API Keys', description: 'API key creation, listing, and revocation' },
@@ -118,6 +120,7 @@ app
   .use(apiKeyRoutes)
   .use(noteRoutes)
   .use(tagRoutes)
+  .use(directoryRoutes)
   .use(graphRoutes)
   .use(agentRoutes)
   .use(activityLogRoutes)

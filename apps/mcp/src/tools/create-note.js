@@ -4,6 +4,7 @@ import { checkScopes } from "../auth.js";
 import { log } from "../logger.js";
 import { logMcpAction } from "../activity-log.js";
 import { prisma } from "../db.js";
+import { businessError, ensureDirectory, handleDirectoryError, toDirectorySummary } from "../directories.js";
 import { reconcileLinks, resolveUnresolvedLinks } from "../links.js";
 
 /**
@@ -24,13 +25,16 @@ export function register(server, auth) {
       content: z.string(),
       status: z.enum(["DRAFT", "PUBLISHED", "ARCHIVED"]).optional(),
       tags: z.array(z.string()).optional(),
+      directoryId: z.string().nullable().optional(),
     },
-    async ({ title, content, status, tags }) => {
+    async ({ title, content, status, tags, directoryId }) => {
       const scopeError = checkScopes(["notes:write"], auth.scopes);
       if (scopeError) return scopeError;
 
       const start = performance.now();
       try {
+        await ensureDirectory(auth.userId, directoryId ?? null);
+
         const excerpt = generateExcerpt(content);
         const wikilinks = extractWikilinks(content);
 
@@ -63,6 +67,7 @@ export function register(server, auth) {
               excerpt,
               status: status ?? "DRAFT",
               userId: auth.userId,
+              directoryId: directoryId ?? null,
               tags: tagOps.length ? { connectOrCreate: tagOps } : undefined,
               revisions: {
                 create: {
@@ -73,7 +78,7 @@ export function register(server, auth) {
                 },
               },
             },
-            include: { tags: true },
+            include: { tags: true, directory: { select: { id: true, name: true, parentId: true } } },
           });
 
           await reconcileLinks(tx, created.id, wikilinks, auth.userId);
@@ -87,6 +92,8 @@ export function register(server, auth) {
           slug: note.slug,
           title: note.title,
           status: note.status,
+          directoryId: note.directoryId,
+          directory: toDirectorySummary(note.directory),
           tags: note.tags.map((t) => t.name),
         };
 
@@ -123,19 +130,8 @@ export function register(server, auth) {
           success: false,
           error: err.message,
         });
-        return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify({
-                error: "Database error",
-                message: err.message,
-                isRetryable: true,
-              }),
-            },
-          ],
-          isError: true,
-        };
+        if (err.code === "DIRECTORY_NOT_FOUND") return businessError("Directory not found");
+        return handleDirectoryError(err);
       }
     },
   );

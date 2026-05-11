@@ -2,6 +2,7 @@ import { describe, test, expect } from 'bun:test';
 import {
   noteKeys,
   tagKeys,
+  directoryKeys,
   graphKeys,
   revKeys,
   searchKeys,
@@ -27,6 +28,10 @@ describe('query key factories', () => {
 
   test('tagKeys.all is a stable array', () => {
     expect(tagKeys.all).toEqual(['tags']);
+  });
+
+  test('directoryKeys.all is a stable array', () => {
+    expect(directoryKeys.all).toEqual(['directories']);
   });
 
   test('graphKeys.all is a stable array', () => {

@@ -75,6 +75,7 @@ function createMockServer() {
 const ALL_SCOPES = ['agent:read', 'notes:write'];
 const ALL_TOOLS = [
   'search_notes', 'read_note', 'list_notes', 'list_tags',
+  'list_directories', 'create_directory', 'update_directory', 'delete_directory',
   'get_backlinks', 'get_outgoing_links', 'get_graph',
   'create_note', 'update_note',
 ];
@@ -83,6 +84,10 @@ const TOOL_REQUIRED_SCOPES = {
   read_note: ['agent:read'],
   list_notes: ['agent:read'],
   list_tags: ['agent:read'],
+  list_directories: ['agent:read'],
+  create_directory: ['notes:write'],
+  update_directory: ['notes:write'],
+  delete_directory: ['notes:write'],
   get_backlinks: ['agent:read'],
   get_outgoing_links: ['agent:read'],
   get_graph: ['agent:read'],

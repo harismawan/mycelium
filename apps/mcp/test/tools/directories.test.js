@@ -1,20 +1,18 @@
 import { describe, test, expect, mock, beforeEach } from 'bun:test';
 
-const mockPrisma = {
-  directory: {
-    findMany: mock(() => []),
-    findFirst: mock(() => null),
-    create: mock(() => ({})),
-    update: mock(() => ({})),
-    delete: mock(() => ({})),
-    count: mock(() => 0),
-  },
-  note: {
-    count: mock(() => 0),
-  },
+const mockDirectoryService = {
+  listTree: mock(() => ({ directories: [] })),
+  createDirectory: mock(() => ({})),
+  updateDirectory: mock(() => ({})),
+  deleteDirectory: mock(() => ({ message: 'Directory deleted' })),
 };
 
-mock.module('../../src/db.js', () => ({ prisma: mockPrisma }));
+mock.module('@mycelium/api/services/directory.service.js', () => ({
+  DirectoryService: mockDirectoryService,
+}));
+mock.module('../../src/db.js', () => ({
+  prisma: { activityLog: { create: mock(() => ({})) } },
+}));
 
 const { register: registerListDirectories } = await import('../../src/tools/list-directories.js');
 const { register: registerCreateDirectory } = await import('../../src/tools/create-directory.js');
@@ -38,24 +36,25 @@ describe('directory MCP tools', () => {
   const writeAuth = { userId: 'u1', scopes: ['notes:write'] };
 
   beforeEach(() => {
-    mockPrisma.directory.findMany.mockReset();
-    mockPrisma.directory.findFirst.mockReset();
-    mockPrisma.directory.create.mockReset();
-    mockPrisma.directory.update.mockReset();
-    mockPrisma.directory.delete.mockReset();
-    mockPrisma.directory.count.mockReset();
-    mockPrisma.note.count.mockReset();
-    mockPrisma.directory.count.mockImplementation(() => 0);
-    mockPrisma.note.count.mockImplementation(() => 0);
+    mockDirectoryService.listTree.mockReset();
+    mockDirectoryService.createDirectory.mockReset();
+    mockDirectoryService.updateDirectory.mockReset();
+    mockDirectoryService.deleteDirectory.mockReset();
   });
 
   test('list_directories returns a nested tree with direct note counts', async () => {
-    const now = new Date();
-    mockPrisma.directory.findMany.mockImplementation(() => [
-      { id: 'root', name: 'Projects', parentId: null, createdAt: now, updatedAt: now, _count: { notes: 2 } },
-      { id: 'child', name: 'Client', parentId: 'root', createdAt: now, updatedAt: now, _count: { notes: 1 } },
-      { id: 'other', name: 'Archive', parentId: null, createdAt: now, updatedAt: now, _count: { notes: 0 } },
-    ]);
+    mockDirectoryService.listTree.mockImplementation(() => ({
+      directories: [
+        {
+          id: 'root',
+          name: 'Projects',
+          parentId: null,
+          noteCount: 2,
+          children: [{ id: 'child', name: 'Client', parentId: 'root', noteCount: 1, children: [] }],
+        },
+        { id: 'other', name: 'Archive', parentId: null, noteCount: 0, children: [] },
+      ],
+    }));
 
     const server = createMockServer();
     registerListDirectories(server, readAuth);
@@ -71,7 +70,9 @@ describe('directory MCP tools', () => {
   });
 
   test('create_directory rejects duplicate sibling names', async () => {
-    mockPrisma.directory.findFirst.mockImplementation(() => ({ id: 'existing' }));
+    mockDirectoryService.createDirectory.mockImplementation(() => {
+      throw { statusCode: 409, message: 'Directory already exists' };
+    });
 
     const server = createMockServer();
     registerCreateDirectory(server, writeAuth);
@@ -83,14 +84,11 @@ describe('directory MCP tools', () => {
   });
 
   test('create_directory creates under an owned parent', async () => {
-    mockPrisma.directory.findFirst
-      .mockImplementationOnce(() => ({ id: 'parent' }))
-      .mockImplementationOnce(() => null);
-    mockPrisma.directory.create.mockImplementation(({ data }) => ({
+    mockDirectoryService.createDirectory.mockImplementation((userId, data) => ({
       id: 'child',
-      name: data.name,
+      name: data.name.trim(),
       parentId: data.parentId,
-      userId: data.userId,
+      userId,
     }));
 
     const server = createMockServer();
@@ -100,22 +98,16 @@ describe('directory MCP tools', () => {
     expect(result.isError).toBeUndefined();
     const parsed = JSON.parse(result.content[0].text);
     expect(parsed).toMatchObject({ id: 'child', name: 'Child', parentId: 'parent' });
-    expect(mockPrisma.directory.create.mock.calls[0][0].data).toMatchObject({
-      name: 'Child',
+    expect(mockDirectoryService.createDirectory).toHaveBeenCalledWith('u1', {
+      name: ' Child ',
       parentId: 'parent',
-      userId: 'u1',
     });
   });
 
   test('update_directory rejects moving a directory under its descendant', async () => {
-    mockPrisma.directory.findFirst
-      .mockImplementationOnce(() => ({ id: 'root', name: 'Root', parentId: null }))
-      .mockImplementationOnce(() => ({ id: 'child' }))
-      .mockImplementationOnce(() => null);
-    mockPrisma.directory.findMany.mockImplementation(() => [
-      { id: 'root', parentId: null },
-      { id: 'child', parentId: 'root' },
-    ]);
+    mockDirectoryService.updateDirectory.mockImplementation(() => {
+      throw { statusCode: 400, message: 'Cannot move a directory into its descendant' };
+    });
 
     const server = createMockServer();
     registerUpdateDirectory(server, writeAuth);
@@ -127,8 +119,9 @@ describe('directory MCP tools', () => {
   });
 
   test('delete_directory rejects non-empty directories', async () => {
-    mockPrisma.directory.findFirst.mockImplementation(() => ({ id: 'dir' }));
-    mockPrisma.note.count.mockImplementation(() => 1);
+    mockDirectoryService.deleteDirectory.mockImplementation(() => {
+      throw { statusCode: 409, message: 'Directory is not empty' };
+    });
 
     const server = createMockServer();
     registerDeleteDirectory(server, writeAuth);
@@ -137,6 +130,6 @@ describe('directory MCP tools', () => {
     expect(result.isError).toBe(true);
     const parsed = JSON.parse(result.content[0].text);
     expect(parsed.error).toBe('Directory is not empty');
-    expect(mockPrisma.directory.delete).not.toHaveBeenCalled();
+    expect(mockDirectoryService.deleteDirectory).toHaveBeenCalledWith('u1', 'dir');
   });
 });

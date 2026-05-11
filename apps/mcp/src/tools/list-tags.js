@@ -1,8 +1,8 @@
 import { z } from "zod";
+import { TagService } from "@mycelium/api/services/tag.service.js";
 import { checkScopes } from "../auth.js";
 import { log } from "../logger.js";
 import { logMcpAction } from "../activity-log.js";
-import { prisma } from "../db.js";
 
 /**
  * Register the `list_tags` tool on the MCP server.
@@ -20,42 +20,14 @@ export function register(server, auth) {
 
     const start = performance.now();
     try {
-      const tags = await prisma.tag.findMany({
-        where: {
-          notes: {
-            some: {
-              userId: auth.userId,
-              status: { not: "ARCHIVED" },
-            },
-          },
-        },
-        include: {
-          _count: {
-            select: {
-              notes: {
-                where: {
-                  userId: auth.userId,
-                  status: { not: "ARCHIVED" },
-                },
-              },
-            },
-          },
-        },
-        orderBy: { name: "asc" },
-      });
-
+      const { tags } = await TagService.listTags(auth.userId);
       const result = {
-        tags: tags.map((t) => ({
-          name: t.name,
-          noteCount: t._count.notes,
-        })),
+        tags: tags.map(({ name, noteCount }) => ({ name, noteCount })),
       };
 
       await logMcpAction(auth, {
         action: "mcp:list_tags",
-
         status: "success",
-
         details: { durationMs: performance.now() - start, success: true },
       });
 
@@ -68,9 +40,7 @@ export function register(server, auth) {
     } catch (err) {
       await logMcpAction(auth, {
         action: "mcp:list_tags",
-
         status: "error",
-
         details: {
           durationMs: performance.now() - start,
           success: false,

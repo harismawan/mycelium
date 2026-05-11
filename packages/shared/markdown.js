@@ -3,6 +3,8 @@ import remarkParse from 'remark-parse';
 import remarkStringify from 'remark-stringify';
 import remarkFrontmatter from 'remark-frontmatter';
 import remarkRehype from 'remark-rehype';
+import rehypeRaw from 'rehype-raw';
+import rehypeSanitize from 'rehype-sanitize';
 import rehypeStringify from 'rehype-stringify';
 import YAML from 'yaml';
 
@@ -151,7 +153,9 @@ export function renderToHtml(markdown) {
   const result = unified()
     .use(remarkParse)
     .use(remarkFrontmatter, ['yaml'])
-    .use(remarkRehype)
+    .use(remarkRehype, { allowDangerousHtml: true })
+    .use(rehypeRaw)
+    .use(rehypeSanitize)
     .use(rehypeStringify)
     .processSync(markdown);
   return String(result);

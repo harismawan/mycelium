@@ -6,27 +6,25 @@ const mockPrisma = {
     create: mock(() => ({})),
   },
   note: {
-    findMany: mock(() => []),
     create: mock(() => ({})),
   },
-  link: {
-    findMany: mock(() => []),
+  activityLog: {
     create: mock(() => ({})),
-    deleteMany: mock(() => ({})),
-    updateMany: mock(() => ({})),
   },
-  $transaction: mock((fn) => fn(mockPrisma)),
+};
+const mockNoteService = {
+  createNote: mock(() => ({})),
+};
+const mockDirectoryService = {
+  findOrCreateMemoriesDirectory: mock(() => ({ id: 'memories-dir' })),
 };
 
 mock.module('../../src/db.js', () => ({ prisma: mockPrisma }));
-mock.module('../../src/links.js', () => ({
-  reconcileLinks: mock(() => Promise.resolve()),
-  resolveUnresolvedLinks: mock(() => Promise.resolve()),
+mock.module('@mycelium/api/services/note.service.js', () => ({
+  NoteService: mockNoteService,
 }));
-mock.module('@mycelium/shared', () => ({
-  generateExcerpt: (c) => c?.slice(0, 100) ?? '',
-  extractWikilinks: () => [],
-  slugify: (t) => t.toLowerCase().replace(/\s+/g, '-'),
+mock.module('@mycelium/api/services/directory.service.js', () => ({
+  DirectoryService: mockDirectoryService,
 }));
 
 const { register } = await import('../../src/tools/save-memory.js');
@@ -53,14 +51,10 @@ describe('save_memory', () => {
   beforeEach(() => {
     mockPrisma.directory.findFirst.mockReset();
     mockPrisma.directory.create.mockReset();
-    mockPrisma.note.findMany.mockReset();
     mockPrisma.note.create.mockReset();
-    mockPrisma.link.findMany.mockReset();
-    mockPrisma.link.create.mockReset();
-    mockPrisma.link.deleteMany.mockReset();
-    mockPrisma.link.updateMany.mockReset();
-    mockPrisma.$transaction.mockReset();
-    mockPrisma.$transaction.mockImplementation((fn) => fn(mockPrisma));
+    mockPrisma.activityLog.create.mockReset();
+    mockNoteService.createNote.mockReset();
+    mockDirectoryService.findOrCreateMemoriesDirectory.mockReset();
 
     const server = createMockServer();
     register(server, auth);
@@ -68,14 +62,13 @@ describe('save_memory', () => {
   });
 
   test('creates note with PUBLISHED status and agent-memory tag', async () => {
-    mockPrisma.directory.findFirst.mockImplementation(() => ({ id: 'memories-dir' }));
-    mockPrisma.note.findMany.mockImplementation(() => []);
-    mockPrisma.note.create.mockImplementation(({ data }) => ({
+    mockDirectoryService.findOrCreateMemoriesDirectory.mockImplementation(() => ({ id: 'memories-dir' }));
+    mockNoteService.createNote.mockImplementation((userId, data) => ({
       id: 'n1',
-      slug: data.slug,
+      slug: 'my-finding',
       title: data.title,
       status: data.status,
-      tags: data.tags.connectOrCreate.map((t) => ({ name: t.create.name })),
+      tags: data.tags.map((name) => ({ name })),
     }));
 
     const result = await handler({ title: 'My Finding', content: 'Some research notes' });
@@ -84,29 +77,25 @@ describe('save_memory', () => {
     expect(parsed.id).toBe('n1');
     expect(parsed.slug).toBe('my-finding');
 
-    // Verify the create call used PUBLISHED status and agent-memory tag
-    const createCall = mockPrisma.note.create.mock.calls[0][0];
-    expect(createCall.data.status).toBe('PUBLISHED');
-    expect(createCall.data.directoryId).toBe('memories-dir');
-    const tagNames = createCall.data.tags.connectOrCreate.map((t) => t.create.name);
-    expect(tagNames).toContain('agent-memory');
+    const createCall = mockNoteService.createNote.mock.calls[0];
+    expect(createCall[1].status).toBe('PUBLISHED');
+    expect(createCall[1].directoryId).toBe('memories-dir');
+    expect(createCall[1].tags).toContain('agent-memory');
   });
 
   test('merges custom tags with agent-memory', async () => {
-    mockPrisma.directory.findFirst.mockImplementation(() => ({ id: 'memories-dir' }));
-    mockPrisma.note.findMany.mockImplementation(() => []);
-    mockPrisma.note.create.mockImplementation(({ data }) => ({
+    mockDirectoryService.findOrCreateMemoriesDirectory.mockImplementation(() => ({ id: 'memories-dir' }));
+    mockNoteService.createNote.mockImplementation((userId, data) => ({
       id: 'n2',
       slug: 'tagged-memory',
       title: data.title,
       status: data.status,
-      tags: data.tags.connectOrCreate.map((t) => ({ name: t.create.name })),
+      tags: data.tags.map((name) => ({ name })),
     }));
 
     await handler({ title: 'Tagged Memory', content: 'body', tags: ['research', 'project'] });
 
-    const createCall = mockPrisma.note.create.mock.calls[0][0];
-    const tagNames = createCall.data.tags.connectOrCreate.map((t) => t.create.name);
+    const tagNames = mockNoteService.createNote.mock.calls[0][1].tags;
     expect(tagNames).toContain('research');
     expect(tagNames).toContain('project');
     expect(tagNames).toContain('agent-memory');
@@ -114,20 +103,18 @@ describe('save_memory', () => {
   });
 
   test('deduplicates agent-memory when already provided in tags', async () => {
-    mockPrisma.directory.findFirst.mockImplementation(() => ({ id: 'memories-dir' }));
-    mockPrisma.note.findMany.mockImplementation(() => []);
-    mockPrisma.note.create.mockImplementation(({ data }) => ({
+    mockDirectoryService.findOrCreateMemoriesDirectory.mockImplementation(() => ({ id: 'memories-dir' }));
+    mockNoteService.createNote.mockImplementation((userId, data) => ({
       id: 'n3',
       slug: 'dedup-memory',
       title: data.title,
       status: data.status,
-      tags: data.tags.connectOrCreate.map((t) => ({ name: t.create.name })),
+      tags: data.tags.map((name) => ({ name })),
     }));
 
     await handler({ title: 'Dedup Memory', content: 'body', tags: ['agent-memory', 'other'] });
 
-    const createCall = mockPrisma.note.create.mock.calls[0][0];
-    const tagNames = createCall.data.tags.connectOrCreate.map((t) => t.create.name);
+    const tagNames = mockNoteService.createNote.mock.calls[0][1].tags;
     const agentMemoryCount = tagNames.filter((n) => n === 'agent-memory').length;
     expect(agentMemoryCount).toBe(1);
     expect(tagNames).toContain('other');
@@ -135,9 +122,8 @@ describe('save_memory', () => {
   });
 
   test('returns only id and slug', async () => {
-    mockPrisma.directory.findFirst.mockImplementation(() => ({ id: 'memories-dir' }));
-    mockPrisma.note.findMany.mockImplementation(() => []);
-    mockPrisma.note.create.mockImplementation(() => ({
+    mockDirectoryService.findOrCreateMemoriesDirectory.mockImplementation(() => ({ id: 'memories-dir' }));
+    mockNoteService.createNote.mockImplementation(() => ({
       id: 'n4',
       slug: 'shape-check',
       title: 'Shape Check',
@@ -164,25 +150,19 @@ describe('save_memory', () => {
   });
 
   test('creates the memories directory when missing', async () => {
-    mockPrisma.directory.findFirst.mockImplementation(() => null);
-    mockPrisma.directory.create.mockImplementation(({ data }) => ({ id: 'new-memories-dir', ...data }));
-    mockPrisma.note.findMany.mockImplementation(() => []);
-    mockPrisma.note.create.mockImplementation(({ data }) => ({
+    mockDirectoryService.findOrCreateMemoriesDirectory.mockImplementation(() => ({ id: 'new-memories-dir' }));
+    mockNoteService.createNote.mockImplementation((userId, data) => ({
       id: 'n5',
-      slug: data.slug,
+      slug: 'memory',
       title: data.title,
       status: data.status,
-      tags: data.tags.connectOrCreate.map((t) => ({ name: t.create.name })),
+      tags: data.tags.map((name) => ({ name })),
     }));
 
     const result = await handler({ title: 'Memory', content: 'body' });
     expect(result.isError).toBeUndefined();
-    expect(mockPrisma.directory.create.mock.calls[0][0].data).toMatchObject({
-      name: 'memories',
-      parentId: null,
-      userId: 'u1',
-    });
-    expect(mockPrisma.note.create.mock.calls[0][0].data.directoryId).toBe('new-memories-dir');
+    expect(mockDirectoryService.findOrCreateMemoriesDirectory).toHaveBeenCalledWith('u1');
+    expect(mockNoteService.createNote.mock.calls[0][1].directoryId).toBe('new-memories-dir');
   });
 
   test('rejects empty title with validation error', () => {

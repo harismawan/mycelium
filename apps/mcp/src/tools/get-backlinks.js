@@ -1,8 +1,9 @@
 import { z } from "zod";
+import { LinkService } from "@mycelium/api/services/link.service.js";
+import { NoteService } from "@mycelium/api/services/note.service.js";
 import { checkScopes } from "../auth.js";
 import { log } from "../logger.js";
 import { logMcpAction } from "../activity-log.js";
-import { prisma } from "../db.js";
 
 /**
  * Register the `get_backlinks` tool on the MCP server.
@@ -26,17 +27,12 @@ export function register(server, auth) {
 
       const start = performance.now();
       try {
-        const note = await prisma.note.findFirst({
-          where: { slug, userId: auth.userId },
-          select: { id: true },
-        });
+        const note = await NoteService.getNote(auth.userId, slug);
 
         if (!note) {
           await logMcpAction(auth, {
             action: "mcp:get_backlinks",
-
             status: "success",
-
             details: { durationMs: performance.now() - start, success: true },
           });
 
@@ -56,34 +52,7 @@ export function register(server, auth) {
           };
         }
 
-        const links = await prisma.link.findMany({
-          where: { toId: note.id },
-          select: { fromId: true },
-        });
-
-        if (!links.length) {
-          await logMcpAction(auth, {
-            action: "mcp:get_backlinks",
-
-            status: "success",
-
-            details: { durationMs: performance.now() - start, success: true },
-          });
-
-          log("info", "tool.call", {
-            tool: "get_backlinks",
-            durationMs: performance.now() - start,
-            success: true,
-          });
-          return { content: [{ type: "text", text: JSON.stringify([]) }] };
-        }
-
-        const fromIds = [...new Set(links.map((l) => l.fromId))];
-
-        const notes = await prisma.note.findMany({
-          where: { id: { in: fromIds } },
-          include: { tags: true },
-        });
+        const notes = await LinkService.getBacklinks(note.id);
 
         const result = notes.map((n) => ({
           id: n.id,
@@ -94,9 +63,7 @@ export function register(server, auth) {
 
         await logMcpAction(auth, {
           action: "mcp:get_backlinks",
-
           status: "success",
-
           details: { durationMs: performance.now() - start, success: true },
         });
 
@@ -109,9 +76,7 @@ export function register(server, auth) {
       } catch (err) {
         await logMcpAction(auth, {
           action: "mcp:get_backlinks",
-
           status: "error",
-
           details: {
             durationMs: performance.now() - start,
             success: false,

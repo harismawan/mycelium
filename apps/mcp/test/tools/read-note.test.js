@@ -1,12 +1,15 @@
 import { describe, test, expect, mock, beforeEach } from 'bun:test';
 
-const mockPrisma = {
-  note: {
-    findFirst: mock(() => null),
-  },
+const mockNoteService = {
+  getNote: mock(() => null),
 };
 
-mock.module('../../src/db.js', () => ({ prisma: mockPrisma }));
+mock.module('@mycelium/api/services/note.service.js', () => ({
+  NoteService: mockNoteService,
+}));
+mock.module('../../src/db.js', () => ({
+  prisma: { activityLog: { create: mock(() => ({})) } },
+}));
 mock.module('@mycelium/shared', () => ({
   DEFAULT_PAGE_LIMIT: 20,
   generateExcerpt: (c) => c?.slice(0, 100) ?? '',
@@ -34,7 +37,7 @@ describe('read_note', () => {
   const auth = { userId: 'u1', scopes: ['agent:read'] };
 
   beforeEach(() => {
-    mockPrisma.note.findFirst.mockReset();
+    mockNoteService.getNote.mockReset();
     const server = createMockServer();
     register(server, auth);
     handler = server.getHandler('read_note');
@@ -42,7 +45,7 @@ describe('read_note', () => {
 
   test('returns JSON format with correct fields', async () => {
     const now = new Date();
-    mockPrisma.note.findFirst.mockImplementation(() => ({
+    mockNoteService.getNote.mockImplementation(() => ({
       id: 'n1',
       slug: 'hello-world',
       title: 'Hello World',
@@ -67,7 +70,7 @@ describe('read_note', () => {
   });
 
   test('returns markdown format with frontmatter', async () => {
-    mockPrisma.note.findFirst.mockImplementation(() => ({
+    mockNoteService.getNote.mockImplementation(() => ({
       id: 'n1',
       slug: 'hello-world',
       title: 'Hello World',
@@ -86,7 +89,7 @@ describe('read_note', () => {
   });
 
   test('returns isError for not-found note', async () => {
-    mockPrisma.note.findFirst.mockImplementation(() => null);
+    mockNoteService.getNote.mockImplementation(() => null);
 
     const result = await handler({ slug: 'nonexistent', format: 'json' });
     expect(result.isError).toBe(true);

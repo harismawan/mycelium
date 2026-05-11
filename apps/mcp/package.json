@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1",
+    "@mycelium/api": "workspace:*",
     "@mycelium/shared": "workspace:*",
     "@prisma/client": "^6",
     "zod": "^3"

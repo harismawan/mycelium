@@ -1,12 +1,15 @@
 import { describe, test, expect, mock, beforeEach } from 'bun:test';
 
-const mockPrisma = {
-  note: {
-    findMany: mock(() => []),
-  },
+const mockNoteService = {
+  listNotes: mock(() => ({ notes: [], nextCursor: null })),
 };
 
-mock.module('../../src/db.js', () => ({ prisma: mockPrisma }));
+mock.module('@mycelium/api/services/note.service.js', () => ({
+  NoteService: mockNoteService,
+}));
+mock.module('../../src/db.js', () => ({
+  prisma: { activityLog: { create: mock(() => ({})) } },
+}));
 mock.module('@mycelium/shared', () => ({
   DEFAULT_PAGE_LIMIT: 20,
   generateExcerpt: (c) => c?.slice(0, 100) ?? '',
@@ -34,7 +37,7 @@ describe('list_notes', () => {
   const auth = { userId: 'u1', scopes: ['agent:read'] };
 
   beforeEach(() => {
-    mockPrisma.note.findMany.mockReset();
+    mockNoteService.listNotes.mockReset();
     const server = createMockServer();
     register(server, auth);
     handler = server.getHandler('list_notes');
@@ -42,10 +45,13 @@ describe('list_notes', () => {
 
   test('returns notes with correct output shape', async () => {
     const now = new Date();
-    mockPrisma.note.findMany.mockImplementation(() => [
-      { id: 'n1', slug: 'note-1', title: 'Note 1', excerpt: 'Excerpt 1', status: 'PUBLISHED', directoryId: 'dir1', directory: { id: 'dir1', name: 'Projects', parentId: null }, tags: [{ name: 'tag1' }], updatedAt: now },
-      { id: 'n2', slug: 'note-2', title: 'Note 2', excerpt: null, status: 'DRAFT', directoryId: null, directory: null, tags: [], updatedAt: now },
-    ]);
+    mockNoteService.listNotes.mockImplementation(() => ({
+      notes: [
+        { id: 'n1', slug: 'note-1', title: 'Note 1', excerpt: 'Excerpt 1', status: 'PUBLISHED', directoryId: 'dir1', directory: { id: 'dir1', name: 'Projects', parentId: null }, tags: [{ name: 'tag1' }], updatedAt: now },
+        { id: 'n2', slug: 'note-2', title: 'Note 2', excerpt: null, status: 'DRAFT', directoryId: null, directory: null, tags: [], updatedAt: now },
+      ],
+      nextCursor: null,
+    }));
 
     const result = await handler({});
     expect(result.isError).toBeUndefined();
@@ -65,8 +71,7 @@ describe('list_notes', () => {
 
   test('returns nextCursor when more results available', async () => {
     const now = new Date();
-    // Return 21 items (take + 1) to indicate more results
-    const notes = Array.from({ length: 21 }, (_, i) => ({
+    const notes = Array.from({ length: 20 }, (_, i) => ({
       id: `n${i}`,
       slug: `note-${i}`,
       title: `Note ${i}`,
@@ -75,7 +80,7 @@ describe('list_notes', () => {
       tags: [],
       updatedAt: now,
     }));
-    mockPrisma.note.findMany.mockImplementation(() => notes);
+    mockNoteService.listNotes.mockImplementation(() => ({ notes, nextCursor: 'n19' }));
 
     const result = await handler({});
     const parsed = JSON.parse(result.content[0].text);
@@ -95,36 +100,30 @@ describe('list_notes', () => {
   });
 
   test('passes filter parameters to query', async () => {
-    mockPrisma.note.findMany.mockImplementation(() => []);
+    mockNoteService.listNotes.mockImplementation(() => ({ notes: [], nextCursor: null }));
 
     const result = await handler({ status: 'DRAFT', tag: 'test', query: 'hello' });
     const parsed = JSON.parse(result.content[0].text);
     expect(parsed.notes).toEqual([]);
     expect(parsed.nextCursor).toBeNull();
-    // Verify findMany was called (filter delegation)
-    expect(mockPrisma.note.findMany).toHaveBeenCalled();
-  });
-
-  test('sorts pinned notes first, then by most recently updated', async () => {
-    mockPrisma.note.findMany.mockImplementation(() => []);
-
-    await handler({});
-
-    const findCall = mockPrisma.note.findMany.mock.calls[0][0];
-    expect(findCall.orderBy).toEqual([
-      { pinned: 'desc' },
-      { updatedAt: 'desc' },
-      { id: 'asc' },
-    ]);
+    expect(mockNoteService.listNotes).toHaveBeenCalledWith('u1', {
+      status: 'DRAFT',
+      tag: 'test',
+      q: 'hello',
+      directoryId: undefined,
+      unfiled: undefined,
+      cursor: undefined,
+      limit: undefined,
+    });
   });
 
   test('filters by directory and unfiled notes', async () => {
-    mockPrisma.note.findMany.mockImplementation(() => []);
+    mockNoteService.listNotes.mockImplementation(() => ({ notes: [], nextCursor: null }));
 
     await handler({ directoryId: 'dir1' });
-    expect(mockPrisma.note.findMany.mock.calls[0][0].where.directoryId).toBe('dir1');
+    expect(mockNoteService.listNotes.mock.calls[0][1].directoryId).toBe('dir1');
 
     await handler({ unfiled: true });
-    expect(mockPrisma.note.findMany.mock.calls[1][0].where.directoryId).toBeNull();
+    expect(mockNoteService.listNotes.mock.calls[1][1].unfiled).toBe(true);
   });
 });

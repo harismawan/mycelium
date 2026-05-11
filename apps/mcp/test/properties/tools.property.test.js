@@ -26,14 +26,39 @@ const mockPrisma = {
     findUnique: mock(() => null),
     update: mock(() => ({})),
   },
+  activityLog: {
+    create: mock(() => ({})),
+  },
   $queryRaw: mock(() => []),
   $transaction: mock((fn) => fn(mockPrisma)),
 };
+const mockNoteService = {
+  getNote: mock(() => null),
+  createNote: mock(() => ({})),
+  updateNote: mock(() => ({})),
+};
+const mockSearchService = {
+  search: mock(() => ({ notes: [], nextCursor: null })),
+};
+const mockTagService = {
+  listTags: mock(() => ({ tags: [] })),
+};
+const mockLinkService = {
+  getGraph: mock(() => ({ nodes: [], edges: [] })),
+};
 
 mock.module('../../src/db.js', () => ({ prisma: mockPrisma }));
-mock.module('../../src/links.js', () => ({
-  reconcileLinks: mock(() => Promise.resolve()),
-  resolveUnresolvedLinks: mock(() => Promise.resolve()),
+mock.module('@mycelium/api/services/note.service.js', () => ({
+  NoteService: mockNoteService,
+}));
+mock.module('@mycelium/api/services/search.service.js', () => ({
+  SearchService: mockSearchService,
+}));
+mock.module('@mycelium/api/services/tag.service.js', () => ({
+  TagService: mockTagService,
+}));
+mock.module('@mycelium/api/services/link.service.js', () => ({
+  LinkService: mockLinkService,
 }));
 mock.module('@mycelium/shared', () => ({
   DEFAULT_PAGE_LIMIT: 20,
@@ -166,7 +191,7 @@ describe('Feature: mcp-server, Property 2: Search results contain all required f
         arbAlpha,
         fc.array(arbSearchResult, { minLength: 0, maxLength: 10 }),
         async (query, mockResults) => {
-          mockPrisma.$queryRaw.mockImplementation(() => mockResults);
+          mockSearchService.search.mockImplementation(() => ({ notes: mockResults, nextCursor: null }));
 
           const server = createMockServer();
           registerSearch(server, { userId: 'u1', scopes: ['agent:read'] });
@@ -176,8 +201,8 @@ describe('Feature: mcp-server, Property 2: Search results contain all required f
           expect(result.isError).toBeUndefined();
 
           const parsed = JSON.parse(result.content[0].text);
-          expect(parsed).toHaveLength(mockResults.length);
-          for (const item of parsed) {
+          expect(parsed.notes).toHaveLength(mockResults.length);
+          for (const item of parsed.notes) {
             expect(item).toHaveProperty('id');
             expect(item).toHaveProperty('slug');
             expect(item).toHaveProperty('title');
@@ -211,7 +236,7 @@ describe('Feature: mcp-server, Property 3: Read note round-trip preserves note d
 
     await fc.assert(
       fc.asyncProperty(arbNote, async (note) => {
-        mockPrisma.note.findFirst.mockImplementation(() => note);
+        mockNoteService.getNote.mockImplementation(() => note);
 
         const server = createMockServer();
         registerRead(server, { userId: 'u1', scopes: ['agent:read'] });
@@ -257,10 +282,7 @@ describe('Feature: mcp-server, Property 4: Create note output reflects created s
             tags: tagNames.map((n) => ({ name: n })),
           };
 
-          // Set up mocks for create_note flow
-          mockPrisma.note.findMany.mockImplementation(() => []);
-          mockPrisma.note.create.mockImplementation(() => mockCreatedNote);
-          mockPrisma.$transaction.mockImplementation((fn) => fn(mockPrisma));
+          mockNoteService.createNote.mockImplementation(() => mockCreatedNote);
 
           const server = createMockServer();
           registerCreate(server, { userId: 'u1', scopes: ['notes:write'] });
@@ -317,10 +339,7 @@ describe('Feature: mcp-server, Property 5: Update note output reflects updated s
           tags: payload.tags ? payload.tags.map((n) => ({ name: n })) : existingNote.tags,
         };
 
-        mockPrisma.note.findFirst.mockImplementation(() => existingNote);
-        mockPrisma.note.findMany.mockImplementation(() => []);
-        mockPrisma.note.update.mockImplementation(() => updatedNote);
-        mockPrisma.$transaction.mockImplementation((fn) => fn(mockPrisma));
+        mockNoteService.updateNote.mockImplementation(() => ({ note: updatedNote }));
 
         const server = createMockServer();
         registerUpdate(server, { userId: 'u1', scopes: ['notes:write'] });
@@ -356,7 +375,13 @@ describe('Feature: mcp-server, Property 6: Tag list is complete, correctly shape
         fc.array(arbTagWithCount, { minLength: 0, maxLength: 20 }),
         async (tags) => {
           const sortedTags = [...tags].sort((a, b) => a.name.localeCompare(b.name));
-          mockPrisma.tag.findMany.mockImplementation(() => sortedTags);
+          mockTagService.listTags.mockImplementation(() => ({
+            tags: sortedTags.map((tag, index) => ({
+              id: `tag-${index}`,
+              name: tag.name,
+              noteCount: tag._count.notes,
+            })),
+          }));
 
           const server = createMockServer();
           registerListTags(server, { userId: 'u1', scopes: ['agent:read'] });
@@ -407,8 +432,7 @@ describe('Feature: mcp-server, Property 7: Graph output contains correctly shape
             edges.push({ fromId: nodes[i].id, toId: nodes[i + 1].id, relation: null });
           }
 
-          mockPrisma.note.findMany.mockImplementation(() => nodes);
-          mockPrisma.link.findMany.mockImplementation(() => edges);
+          mockLinkService.getGraph.mockImplementation(() => ({ nodes, edges }));
 
           const server = createMockServer();
           registerGetGraph(server, { userId: 'u1', scopes: ['agent:read'] });
@@ -472,7 +496,7 @@ describe('Feature: mcp-server, Property 8: Validation errors produce JSON-RPC er
   test('read_note returns isError for not-found slugs', async () => {
     await fc.assert(
       fc.asyncProperty(arbSlug, async (slug) => {
-        mockPrisma.note.findFirst.mockImplementation(() => null);
+        mockNoteService.getNote.mockImplementation(() => null);
 
         const server = createMockServer();
         registerRead(server, { userId: 'u1', scopes: ['agent:read'] });
@@ -491,7 +515,9 @@ describe('Feature: mcp-server, Property 8: Validation errors produce JSON-RPC er
   test('update_note returns isError for not-found slugs', async () => {
     await fc.assert(
       fc.asyncProperty(arbSlug, async (slug) => {
-        mockPrisma.note.findFirst.mockImplementation(() => null);
+        mockNoteService.updateNote.mockImplementation(() => {
+          throw { statusCode: 404, message: 'Note not found' };
+        });
 
         const server = createMockServer();
         registerUpdate(server, { userId: 'u1', scopes: ['notes:write'] });

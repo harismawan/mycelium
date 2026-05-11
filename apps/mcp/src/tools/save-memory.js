@@ -1,11 +1,9 @@
 import { z } from "zod";
-import { generateExcerpt, extractWikilinks, slugify } from "@mycelium/shared";
+import { DirectoryService } from "@mycelium/api/services/directory.service.js";
+import { NoteService } from "@mycelium/api/services/note.service.js";
 import { checkScopes } from "../auth.js";
 import { log } from "../logger.js";
 import { logMcpAction } from "../activity-log.js";
-import { prisma } from "../db.js";
-import { findOrCreateMemoriesDirectory } from "../directories.js";
-import { reconcileLinks, resolveUnresolvedLinks } from "../links.js";
 
 /**
  * Register the `save_memory` tool on the MCP server.
@@ -14,7 +12,7 @@ import { reconcileLinks, resolveUnresolvedLinks } from "../links.js";
  * note auto-tagged with `agent-memory`.
  *
  * @param {import('@modelcontextprotocol/sdk/server/mcp.js').McpServer} server
- * @param {{ userId: string, scopes: string[] }} auth
+ * @param {{ userId: string, scopes: string[], apiKeyId?: string, apiKeyName?: string }} auth
  */
 export function register(server, auth) {
   server.tool(
@@ -33,53 +31,16 @@ export function register(server, auth) {
       try {
         // Merge agent-memory tag, deduplicate via Set
         const allTags = [...new Set([...(tags ?? []), "agent-memory"])];
-
-        const excerpt = generateExcerpt(content);
-        const wikilinks = extractWikilinks(content);
-
-        // Generate a unique slug
-        const baseSlug = slugify(title);
-        const existing = await prisma.note.findMany({
-          where: { slug: { startsWith: baseSlug } },
-          select: { slug: true },
-        });
-        const existingSlugs = new Set(existing.map((n) => n.slug));
-        let slug = baseSlug;
-        if (existingSlugs.has(slug)) {
-          let counter = 1;
-          while (existingSlugs.has(`${slug}-${counter}`)) counter++;
-          slug = `${slug}-${counter}`;
-        }
-
-        // Build tag connect-or-create operations
-        const tagOps = allTags.map((name) => ({
-          where: { name },
-          create: { name },
-        }));
-
-        const note = await prisma.$transaction(async (tx) => {
-          const memoriesDirectory = await findOrCreateMemoriesDirectory(auth.userId, tx);
-          const created = await tx.note.create({
-            data: {
-              title,
-              content,
-              slug,
-              excerpt,
-              status: "PUBLISHED",
-              userId: auth.userId,
-              directoryId: memoriesDirectory.id,
-              tags: { connectOrCreate: tagOps },
-              revisions: {
-                create: { content },
-              },
-            },
-            include: { tags: true },
-          });
-
-          await reconcileLinks(tx, created.id, wikilinks, auth.userId);
-          await resolveUnresolvedLinks(tx, created.id, title);
-
-          return created;
+        const memoriesDirectory = await DirectoryService.findOrCreateMemoriesDirectory(auth.userId);
+        const note = await NoteService.createNote(auth.userId, {
+          title,
+          content,
+          status: "PUBLISHED",
+          tags: allTags,
+          directoryId: memoriesDirectory.id,
+          authType: "apikey",
+          apiKeyId: auth.apiKeyId,
+          apiKeyName: auth.apiKeyName,
         });
 
         const result = {
@@ -89,9 +50,7 @@ export function register(server, auth) {
 
         await logMcpAction(auth, {
           action: "mcp:save_memory",
-
           status: "success",
-
           details: { durationMs: performance.now() - start, success: true },
         });
 
@@ -104,9 +63,7 @@ export function register(server, auth) {
       } catch (err) {
         await logMcpAction(auth, {
           action: "mcp:save_memory",
-
           status: "error",
-
           details: {
             durationMs: performance.now() - start,
             success: false,

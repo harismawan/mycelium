@@ -1,9 +1,9 @@
 import { z } from "zod";
 import { serializeFrontmatter } from "@mycelium/shared";
+import { NoteService } from "@mycelium/api/services/note.service.js";
 import { checkScopes } from "../auth.js";
 import { log } from "../logger.js";
 import { logMcpAction } from "../activity-log.js";
-import { prisma } from "../db.js";
 import { toDirectorySummary } from "../directories.js";
 
 /**
@@ -28,17 +28,12 @@ export function register(server, auth) {
 
       const start = performance.now();
       try {
-        const note = await prisma.note.findFirst({
-          where: { slug, userId: auth.userId },
-          include: { tags: true, directory: { select: { id: true, name: true, parentId: true } } },
-        });
+        const note = await NoteService.getNote(auth.userId, slug);
 
         if (!note) {
           await logMcpAction(auth, {
             action: "mcp:read_note",
-
             status: "success",
-
             details: { durationMs: performance.now() - start, success: true },
           });
 
@@ -86,9 +81,7 @@ export function register(server, auth) {
 
         await logMcpAction(auth, {
           action: "mcp:read_note",
-
           status: "success",
-
           details: { durationMs: performance.now() - start, success: true },
         });
 
@@ -101,9 +94,7 @@ export function register(server, auth) {
       } catch (err) {
         await logMcpAction(auth, {
           action: "mcp:read_note",
-
           status: "error",
-
           details: {
             durationMs: performance.now() - start,
             success: false,

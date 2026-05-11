@@ -33,18 +33,16 @@ jobs:
         working-directory: ./apps/api
         run: bunx prisma generate
 
-      - name: Run API tests
-        working-directory: ./apps/api
+      - name: Run all tests
         env:
           JWT_SECRET: test-secret
           NODE_ENV: test
         run: bun test --isolate
 
-      - name: Run MCP tests
-        working-directory: ./apps/mcp
+      - name: Build web app
         env:
           NODE_ENV: test
-        run: bun test --isolate
+        run: bun --bun run --cwd apps/web build
 
   build-api:
     name: Build API Image

@@ -1,9 +1,9 @@
 import { z } from "zod";
+import { DirectoryService } from "@mycelium/api/services/directory.service.js";
 import { checkScopes } from "../auth.js";
 import { log } from "../logger.js";
 import { logMcpAction } from "../activity-log.js";
-import { prisma } from "../db.js";
-import { businessError, databaseError } from "../directories.js";
+import { handleDirectoryError } from "../directories.js";
 
 export function register(server, auth) {
   server.tool(
@@ -18,19 +18,7 @@ export function register(server, auth) {
 
       const start = performance.now();
       try {
-        const existing = await prisma.directory.findFirst({
-          where: { id, userId: auth.userId },
-          select: { id: true },
-        });
-        if (!existing) return businessError("Directory not found");
-
-        const [noteCount, childCount] = await Promise.all([
-          prisma.note.count({ where: { userId: auth.userId, directoryId: id } }),
-          prisma.directory.count({ where: { userId: auth.userId, parentId: id } }),
-        ]);
-        if (noteCount > 0 || childCount > 0) return businessError("Directory is not empty");
-
-        await prisma.directory.delete({ where: { id } });
+        const result = await DirectoryService.deleteDirectory(auth.userId, id);
 
         await logMcpAction(auth, {
           action: "mcp:delete_directory",
@@ -44,7 +32,7 @@ export function register(server, auth) {
           durationMs: performance.now() - start,
           success: true,
         });
-        return { content: [{ type: "text", text: JSON.stringify({ message: "Directory deleted" }) }] };
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
       } catch (err) {
         await logMcpAction(auth, {
           action: "mcp:delete_directory",
@@ -59,7 +47,7 @@ export function register(server, auth) {
           success: false,
           error: err.message,
         });
-        return databaseError(err);
+        return handleDirectoryError(err);
       }
     },
   );

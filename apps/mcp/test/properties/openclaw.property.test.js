@@ -19,14 +19,31 @@ const mockPrisma = {
     deleteMany: mock(() => ({})),
     updateMany: mock(() => ({})),
   },
+  activityLog: {
+    create: mock(() => ({})),
+  },
   $queryRaw: mock(() => []),
   $transaction: mock((fn) => fn(mockPrisma)),
 };
+const mockNoteService = {
+  createNote: mock(() => ({})),
+};
+const mockSearchService = {
+  getContext: mock(() => []),
+};
+const mockDirectoryService = {
+  findOrCreateMemoriesDirectory: mock(() => ({ id: 'memories-dir' })),
+};
 
 mock.module('../../src/db.js', () => ({ prisma: mockPrisma }));
-mock.module('../../src/links.js', () => ({
-  reconcileLinks: mock(() => Promise.resolve()),
-  resolveUnresolvedLinks: mock(() => Promise.resolve()),
+mock.module('@mycelium/api/services/note.service.js', () => ({
+  NoteService: mockNoteService,
+}));
+mock.module('@mycelium/api/services/search.service.js', () => ({
+  SearchService: mockSearchService,
+}));
+mock.module('@mycelium/api/services/directory.service.js', () => ({
+  DirectoryService: mockDirectoryService,
 }));
 mock.module('@mycelium/shared', () => ({
   DEFAULT_PAGE_LIMIT: 20,
@@ -70,8 +87,7 @@ const arbLimit = fc.integer({ min: 1, max: 20 });
 
 describe('Feature: mcp-server, Property 9: get_context returns relevant or recent notes within limit', () => {
   beforeEach(() => {
-    mockPrisma.$queryRaw.mockReset();
-    mockPrisma.note.findMany.mockReset();
+    mockSearchService.getContext.mockReset();
   });
 
   test('result count never exceeds limit and each note has required fields (topic path)', async () => {
@@ -94,13 +110,13 @@ describe('Feature: mcp-server, Property 9: get_context returns relevant or recen
           // We generate up to 20 notes but the DB would return at most `limit`.
           const dbResults = mockNotes.slice(0, limit);
 
-          // Reset before each iteration to avoid stale mockImplementationOnce
-          mockPrisma.$queryRaw.mockReset();
-
-          // First $queryRaw: search results, second: tags
-          mockPrisma.$queryRaw
-            .mockImplementationOnce(() => dbResults)
-            .mockImplementationOnce(() => []);
+          mockSearchService.getContext.mockImplementation(() =>
+            dbResults.map((note) => ({
+              ...note,
+              tags: [],
+              updatedAt: note.updatedAt.toISOString(),
+            })),
+          );
 
           const server = createMockServer();
           registerGetContext(server, { userId: 'u1', scopes: ['agent:read'] });
@@ -147,9 +163,14 @@ describe('Feature: mcp-server, Property 9: get_context returns relevant or recen
         arbLimit,
         fc.array(arbNote, { minLength: 0, maxLength: 20 }),
         async (limit, mockNotes) => {
-          // Simulate Prisma returning at most `limit` notes (as `take` would)
           const dbResults = mockNotes.slice(0, limit);
-          mockPrisma.note.findMany.mockImplementation(() => dbResults);
+          mockSearchService.getContext.mockImplementation(() =>
+            dbResults.map((note) => ({
+              ...note,
+              tags: note.tags.map((tag) => tag.name),
+              updatedAt: note.updatedAt.toISOString(),
+            })),
+          );
 
           const server = createMockServer();
           registerGetContext(server, { userId: 'u1', scopes: ['agent:read'] });
@@ -194,6 +215,9 @@ describe('Feature: mcp-server, Property 10: save_memory always includes agent-me
     mockPrisma.note.create.mockReset();
     mockPrisma.$transaction.mockReset();
     mockPrisma.$transaction.mockImplementation((fn) => fn(mockPrisma));
+    mockNoteService.createNote.mockReset();
+    mockDirectoryService.findOrCreateMemoriesDirectory.mockReset();
+    mockDirectoryService.findOrCreateMemoriesDirectory.mockImplementation(() => ({ id: 'memories-dir' }));
   });
 
   test('tags always include agent-memory, status is always PUBLISHED, no duplicate agent-memory', async () => {
@@ -209,18 +233,16 @@ describe('Feature: mcp-server, Property 10: save_memory always includes agent-me
         fc.string({ minLength: 1, maxLength: 200 }),
         arbTags,
         async (title, content, tags) => {
-          // Track what gets passed to prisma.note.create
           let capturedData = null;
-          mockPrisma.directory.findFirst.mockImplementation(() => ({ id: 'memories-dir' }));
-          mockPrisma.note.findMany.mockImplementation(() => []);
-          mockPrisma.note.create.mockImplementation(({ data }) => {
+          mockDirectoryService.findOrCreateMemoriesDirectory.mockImplementation(() => ({ id: 'memories-dir' }));
+          mockNoteService.createNote.mockImplementation((userId, data) => {
             capturedData = data;
             return {
               id: 'gen-id',
-              slug: data.slug,
+              slug: 'gen-slug',
               title: data.title,
               status: data.status,
-              tags: data.tags.connectOrCreate.map((t) => ({ name: t.create.name })),
+              tags: data.tags.map((name) => ({ name })),
             };
           });
 
@@ -239,7 +261,7 @@ describe('Feature: mcp-server, Property 10: save_memory always includes agent-me
           expect(capturedData.directoryId).toBe('memories-dir');
 
           // Tags always include agent-memory
-          const tagNames = capturedData.tags.connectOrCreate.map((t) => t.create.name);
+          const tagNames = capturedData.tags;
           expect(tagNames).toContain('agent-memory');
 
           // No duplicate agent-memory tags
@@ -271,16 +293,15 @@ describe('Feature: mcp-server, Property 10: save_memory always includes agent-me
           const userTags = ['agent-memory', ...extraTags];
 
           let capturedData = null;
-          mockPrisma.directory.findFirst.mockImplementation(() => ({ id: 'memories-dir' }));
-          mockPrisma.note.findMany.mockImplementation(() => []);
-          mockPrisma.note.create.mockImplementation(({ data }) => {
+          mockDirectoryService.findOrCreateMemoriesDirectory.mockImplementation(() => ({ id: 'memories-dir' }));
+          mockNoteService.createNote.mockImplementation((userId, data) => {
             capturedData = data;
             return {
               id: 'gen-id',
-              slug: data.slug,
+              slug: 'gen-slug',
               title: data.title,
               status: data.status,
-              tags: data.tags.connectOrCreate.map((t) => ({ name: t.create.name })),
+              tags: data.tags.map((name) => ({ name })),
             };
           });
 
@@ -291,7 +312,7 @@ describe('Feature: mcp-server, Property 10: save_memory always includes agent-me
           const result = await handler({ title, content, tags: userTags });
           expect(result.isError).toBeUndefined();
 
-          const tagNames = capturedData.tags.connectOrCreate.map((t) => t.create.name);
+          const tagNames = capturedData.tags;
           const agentMemoryCount = tagNames.filter((n) => n === 'agent-memory').length;
           expect(agentMemoryCount).toBe(1);
         },

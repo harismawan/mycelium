@@ -1,15 +1,9 @@
 import { z } from "zod";
+import { DirectoryService } from "@mycelium/api/services/directory.service.js";
 import { checkScopes } from "../auth.js";
 import { log } from "../logger.js";
 import { logMcpAction } from "../activity-log.js";
-import { prisma } from "../db.js";
-import {
-  businessError,
-  ensureDirectory,
-  ensureUniqueSibling,
-  handleDirectoryError,
-  toDirectoryResponse,
-} from "../directories.js";
+import { handleDirectoryError, toDirectoryResponse } from "../directories.js";
 
 export function register(server, auth) {
   server.tool(
@@ -25,15 +19,9 @@ export function register(server, auth) {
 
       const start = performance.now();
       try {
-        const name = rawName.trim();
-        const parentId = rawParentId ?? null;
-        if (!name) return businessError("Directory name is required");
-
-        await ensureDirectory(auth.userId, parentId);
-        await ensureUniqueSibling(auth.userId, name, parentId);
-
-        const directory = await prisma.directory.create({
-          data: { name, parentId, userId: auth.userId },
+        const directory = await DirectoryService.createDirectory(auth.userId, {
+          name: rawName,
+          parentId: rawParentId ?? null,
         });
 
         await logMcpAction(auth, {

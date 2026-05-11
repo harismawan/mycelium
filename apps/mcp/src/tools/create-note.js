@@ -1,11 +1,9 @@
 import { z } from "zod";
-import { generateExcerpt, extractWikilinks, slugify } from "@mycelium/shared";
+import { NoteService } from "@mycelium/api/services/note.service.js";
 import { checkScopes } from "../auth.js";
 import { log } from "../logger.js";
 import { logMcpAction } from "../activity-log.js";
-import { prisma } from "../db.js";
-import { businessError, ensureDirectory, handleDirectoryError, toDirectorySummary } from "../directories.js";
-import { reconcileLinks, resolveUnresolvedLinks } from "../links.js";
+import { handleDirectoryError, toDirectorySummary } from "../directories.js";
 
 /**
  * Register the `create_note` tool on the MCP server.
@@ -33,58 +31,15 @@ export function register(server, auth) {
 
       const start = performance.now();
       try {
-        await ensureDirectory(auth.userId, directoryId ?? null);
-
-        const excerpt = generateExcerpt(content);
-        const wikilinks = extractWikilinks(content);
-
-        // Generate a unique slug
-        const baseSlug = slugify(title);
-        const existing = await prisma.note.findMany({
-          where: { slug: { startsWith: baseSlug } },
-          select: { slug: true },
-        });
-        const existingSlugs = new Set(existing.map((n) => n.slug));
-        let slug = baseSlug;
-        if (existingSlugs.has(slug)) {
-          let counter = 1;
-          while (existingSlugs.has(`${slug}-${counter}`)) counter++;
-          slug = `${slug}-${counter}`;
-        }
-
-        // Build tag connect-or-create operations
-        const tagOps = (tags ?? []).map((name) => ({
-          where: { name },
-          create: { name },
-        }));
-
-        const note = await prisma.$transaction(async (tx) => {
-          const created = await tx.note.create({
-            data: {
-              title,
-              content,
-              slug,
-              excerpt,
-              status: status ?? "DRAFT",
-              userId: auth.userId,
-              directoryId: directoryId ?? null,
-              tags: tagOps.length ? { connectOrCreate: tagOps } : undefined,
-              revisions: {
-                create: {
-                  content,
-                  authType: "apikey",
-                  apiKeyId: auth.apiKeyId,
-                  apiKeyName: auth.apiKeyName,
-                },
-              },
-            },
-            include: { tags: true, directory: { select: { id: true, name: true, parentId: true } } },
-          });
-
-          await reconcileLinks(tx, created.id, wikilinks, auth.userId);
-          await resolveUnresolvedLinks(tx, created.id, title);
-
-          return created;
+        const note = await NoteService.createNote(auth.userId, {
+          title,
+          content,
+          status,
+          tags,
+          directoryId,
+          authType: "apikey",
+          apiKeyId: auth.apiKeyId,
+          apiKeyName: auth.apiKeyName,
         });
 
         const result = {
@@ -99,9 +54,7 @@ export function register(server, auth) {
 
         await logMcpAction(auth, {
           action: "mcp:create_note",
-
           status: "success",
-
           details: { durationMs: performance.now() - start, success: true },
         });
 
@@ -114,9 +67,7 @@ export function register(server, auth) {
       } catch (err) {
         await logMcpAction(auth, {
           action: "mcp:create_note",
-
           status: "error",
-
           details: {
             durationMs: performance.now() - start,
             success: false,
@@ -130,7 +81,6 @@ export function register(server, auth) {
           success: false,
           error: err.message,
         });
-        if (err.code === "DIRECTORY_NOT_FOUND") return businessError("Directory not found");
         return handleDirectoryError(err);
       }
     },

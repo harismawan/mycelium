@@ -3,6 +3,7 @@ import { DEFAULT_PAGE_LIMIT } from '@mycelium/shared';
 import { authMiddleware } from '../middleware/auth.js';
 import { csrfMiddleware } from '../middleware/csrf.js';
 import { prisma } from '../db.js';
+import { TagService } from '../services/tag.service.js';
 import { ErrorResponse, TagListResponse, TagNotesResponse } from '../schemas/responses.js';
 
 /**
@@ -20,37 +21,7 @@ export const tagRoutes = new Elysia({ prefix: '/api/v1/tags' })
   .get(
     '/',
     async (/** @type {{ user: { id: string } }} */ ctx) => {
-      const tags = await prisma.tag.findMany({
-        where: {
-          notes: {
-            some: {
-              userId: ctx.user.id,
-              status: { not: 'ARCHIVED' },
-            },
-          },
-        },
-        include: {
-          _count: {
-            select: {
-              notes: {
-                where: {
-                  userId: ctx.user.id,
-                  status: { not: 'ARCHIVED' },
-                },
-              },
-            },
-          },
-        },
-        orderBy: { name: 'asc' },
-      });
-
-      return {
-        tags: tags.map((tag) => ({
-          id: tag.id,
-          name: tag.name,
-          noteCount: tag._count.notes,
-        })),
-      };
+      return TagService.listTags(ctx.user.id);
     },
     {
       response: {

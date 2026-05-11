@@ -1,9 +1,8 @@
 import { z } from "zod";
-import { DEFAULT_PAGE_LIMIT } from "@mycelium/shared";
+import { NoteService } from "@mycelium/api/services/note.service.js";
 import { checkScopes } from "../auth.js";
 import { log } from "../logger.js";
 import { logMcpAction } from "../activity-log.js";
-import { prisma } from "../db.js";
 
 /**
  * Register the `list_notes` tool on the MCP server.
@@ -32,44 +31,15 @@ export function register(server, auth) {
 
       const start = performance.now();
       try {
-        const take = limit ?? DEFAULT_PAGE_LIMIT;
-
-        /** @type {Record<string, unknown>} */
-        const where = { userId: auth.userId };
-
-        if (status) {
-          where.status = status;
-        } else {
-          where.status = { not: "ARCHIVED" };
-        }
-
-        if (tag) {
-          where.tags = { some: { name: tag } };
-        }
-
-        if (query) {
-          where.OR = [
-            { title: { contains: query, mode: "insensitive" } },
-            { content: { contains: query, mode: "insensitive" } },
-          ];
-        }
-
-        if (unfiled) {
-          where.directoryId = null;
-        } else if (directoryId) {
-          where.directoryId = directoryId;
-        }
-
-        const notes = await prisma.note.findMany({
-          where,
-          take: take + 1,
-          ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-          orderBy: [{ pinned: "desc" }, { updatedAt: "desc" }, { id: "asc" }],
-          include: { tags: true, directory: { select: { id: true, name: true, parentId: true } } },
+        const { notes, nextCursor } = await NoteService.listNotes(auth.userId, {
+          status,
+          tag,
+          q: query,
+          directoryId,
+          unfiled,
+          cursor,
+          limit,
         });
-
-        const hasMore = notes.length > take;
-        if (hasMore) notes.pop();
 
         const result = {
           notes: notes.map((n) => ({
@@ -85,14 +55,12 @@ export function register(server, auth) {
               : null,
             updatedAt: n.updatedAt.toISOString(),
           })),
-          nextCursor: hasMore ? notes[notes.length - 1].id : null,
+          nextCursor,
         };
 
         await logMcpAction(auth, {
           action: "mcp:list_notes",
-
           status: "success",
-
           details: { durationMs: performance.now() - start, success: true },
         });
 
@@ -105,9 +73,7 @@ export function register(server, auth) {
       } catch (err) {
         await logMcpAction(auth, {
           action: "mcp:list_notes",
-
           status: "error",
-
           details: {
             durationMs: performance.now() - start,
             success: false,

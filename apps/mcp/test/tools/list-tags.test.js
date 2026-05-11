@@ -1,12 +1,15 @@
 import { describe, test, expect, mock, beforeEach } from 'bun:test';
 
-const mockPrisma = {
-  tag: {
-    findMany: mock(() => []),
-  },
+const mockTagService = {
+  listTags: mock(() => ({ tags: [] })),
 };
 
-mock.module('../../src/db.js', () => ({ prisma: mockPrisma }));
+mock.module('@mycelium/api/services/tag.service.js', () => ({
+  TagService: mockTagService,
+}));
+mock.module('../../src/db.js', () => ({
+  prisma: { activityLog: { create: mock(() => ({})) } },
+}));
 mock.module('@mycelium/shared', () => ({
   DEFAULT_PAGE_LIMIT: 20,
   generateExcerpt: (c) => c?.slice(0, 100) ?? '',
@@ -34,18 +37,20 @@ describe('list_tags', () => {
   const auth = { userId: 'u1', scopes: ['agent:read'] };
 
   beforeEach(() => {
-    mockPrisma.tag.findMany.mockReset();
+    mockTagService.listTags.mockReset();
     const server = createMockServer();
     register(server, auth);
     handler = server.getHandler('list_tags');
   });
 
   test('returns tags with name and noteCount', async () => {
-    mockPrisma.tag.findMany.mockImplementation(() => [
-      { name: 'alpha', _count: { notes: 3 } },
-      { name: 'beta', _count: { notes: 1 } },
-      { name: 'gamma', _count: { notes: 5 } },
-    ]);
+    mockTagService.listTags.mockImplementation(() => ({
+      tags: [
+        { id: 't1', name: 'alpha', noteCount: 3 },
+        { id: 't2', name: 'beta', noteCount: 1 },
+        { id: 't3', name: 'gamma', noteCount: 5 },
+      ],
+    }));
 
     const result = await handler({});
     expect(result.isError).toBeUndefined();
@@ -57,11 +62,13 @@ describe('list_tags', () => {
   });
 
   test('returns tags sorted alphabetically', async () => {
-    mockPrisma.tag.findMany.mockImplementation(() => [
-      { name: 'aaa', _count: { notes: 1 } },
-      { name: 'bbb', _count: { notes: 2 } },
-      { name: 'ccc', _count: { notes: 3 } },
-    ]);
+    mockTagService.listTags.mockImplementation(() => ({
+      tags: [
+        { id: 't1', name: 'aaa', noteCount: 1 },
+        { id: 't2', name: 'bbb', noteCount: 2 },
+        { id: 't3', name: 'ccc', noteCount: 3 },
+      ],
+    }));
 
     const result = await handler({});
     const parsed = JSON.parse(result.content[0].text);
@@ -70,7 +77,7 @@ describe('list_tags', () => {
   });
 
   test('returns empty array when no tags', async () => {
-    mockPrisma.tag.findMany.mockImplementation(() => []);
+    mockTagService.listTags.mockImplementation(() => ({ tags: [] }));
 
     const result = await handler({});
     const parsed = JSON.parse(result.content[0].text);

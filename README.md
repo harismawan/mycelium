@@ -22,7 +22,7 @@
 - **Knowledge graph** — Force-directed visualization of note connections with ego-subgraph exploration
 - **Dual auth** — JWT cookies (access + refresh tokens) for humans, scoped API keys for agents, Redis-backed session management
 - **Agent API** — NDJSON bundle streaming, paginated listings, and full-text search for AI consumers
-- **MCP server** — 14 tools exposing the knowledge base to Claude, Cursor, Kiro, and OpenClaw
+- **MCP server** — 18 tools exposing the knowledge base to Claude, Cursor, Kiro, and OpenClaw
 - **Activity audit trail** — Every agent action logged with API key identity, filterable feed, and per-key rate limiting
 - **Revision history** — Immutable snapshots with diff view, agent/human badges, and one-click revert
 - **Full-text search** — PostgreSQL tsvector-powered search across all note content
@@ -244,7 +244,7 @@ docker compose -f docker-compose.prod.yml exec api bunx prisma db seed
 |----------|---------|-------------|
 | `DATABASE_URL` | `postgresql://mycelium:mycelium@localhost:5432/mycelium` | PostgreSQL connection string |
 | `REDIS_URL` | `redis://localhost:6379` | Redis connection string |
-| `JWT_SECRET` | `change-this-in-production` | JWT signing secret |
+| `JWT_SECRET` | `mycelium-dev-secret-change-in-production` | JWT signing secret; set a strong random value in production |
 | `PORT` | `3000` | API server port |
 | `MYCELIUM_API_KEY` | — | API key for MCP stdio transport |
 | `MCP_TRANSPORT` | `stdio` | MCP transport (`stdio` or `http`) |
@@ -264,7 +264,7 @@ docker compose -f docker-compose.prod.yml exec api bunx prisma db seed
 
 ## Agent API
 
-REST endpoints for AI agents under `/api/v1/agent`. Full docs in [AGENTS.md](./AGENTS.md).
+REST endpoints for AI agents under `/api/v1/agent`. The manifest endpoint returns machine-readable discovery and schema details.
 
 | Endpoint | Description |
 |----------|-------------|
@@ -295,7 +295,7 @@ Exposes the knowledge base to AI agents via the [Model Context Protocol](https:/
 }
 ```
 
-### Tools (14)
+### Tools (18)
 
 | Tool | Scope | Description |
 |------|-------|-------------|
@@ -306,6 +306,10 @@ Exposes the knowledge base to AI agents via the [Model Context Protocol](https:/
 | `get_backlinks` | `agent:read` | Inbound links |
 | `get_outgoing_links` | `agent:read` | Outbound wikilinks |
 | `get_graph` | `agent:read` | Knowledge graph / ego-subgraph |
+| `list_directories` | `agent:read` | Directory tree with note counts |
+| `create_directory` | `notes:write` | Create a directory |
+| `update_directory` | `notes:write` | Rename or move a directory |
+| `delete_directory` | `notes:write` | Delete an empty directory |
 | `create_note` | `notes:write` | Create a note |
 | `update_note` | `notes:write` | Update a note |
 | `get_context` | `agent:read` | Load relevant notes for a topic |
@@ -320,13 +324,13 @@ Exposes the knowledge base to AI agents via the [Model Context Protocol](https:/
 
 ```bash
 # API unit + property tests
-bun test --cwd apps/api
+bun test --isolate --cwd apps/api
 
 # MCP server tests
-bun test --cwd apps/mcp
+bun test --isolate --cwd apps/mcp
 
 # Shared package tests
-bun test --cwd packages/shared
+bun test --isolate --cwd packages/shared
 ```
 
 ---

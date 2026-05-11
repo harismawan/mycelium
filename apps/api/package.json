@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "exports": {
+    "./services/*.js": "./src/services/*.js"
+  },
   "scripts": {
     "dev": "bun --watch src/index.js",
     "start": "bun src/index.js",

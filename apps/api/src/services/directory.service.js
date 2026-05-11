@@ -169,4 +169,23 @@ export const DirectoryService = {
     await prisma.directory.delete({ where: { id } });
     return { message: 'Directory deleted' };
   },
+
+  /**
+   * Find or create the root memories directory used by agent memory tools.
+   *
+   * @param {string} userId
+   * @returns {Promise<{ id: string }>}
+   */
+  async findOrCreateMemoriesDirectory(userId) {
+    const existing = await prisma.directory.findFirst({
+      where: { userId, parentId: null, name: 'memories' },
+      select: { id: true },
+    });
+    if (existing) return existing;
+
+    return prisma.directory.create({
+      data: { name: 'memories', parentId: null, userId },
+      select: { id: true },
+    });
+  },
 };

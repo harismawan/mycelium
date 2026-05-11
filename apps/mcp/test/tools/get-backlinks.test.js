@@ -1,16 +1,21 @@
 import { describe, test, expect, mock, beforeEach } from 'bun:test';
 
-const mockPrisma = {
-  note: {
-    findFirst: mock(() => null),
-    findMany: mock(() => []),
-  },
-  link: {
-    findMany: mock(() => []),
-  },
+const mockNoteService = {
+  getNote: mock(() => null),
+};
+const mockLinkService = {
+  getBacklinks: mock(() => []),
 };
 
-mock.module('../../src/db.js', () => ({ prisma: mockPrisma }));
+mock.module('@mycelium/api/services/note.service.js', () => ({
+  NoteService: mockNoteService,
+}));
+mock.module('@mycelium/api/services/link.service.js', () => ({
+  LinkService: mockLinkService,
+}));
+mock.module('../../src/db.js', () => ({
+  prisma: { activityLog: { create: mock(() => ({})) } },
+}));
 mock.module('@mycelium/shared', () => ({
   DEFAULT_PAGE_LIMIT: 20,
   generateExcerpt: (c) => c?.slice(0, 100) ?? '',
@@ -38,21 +43,16 @@ describe('get_backlinks', () => {
   const auth = { userId: 'u1', scopes: ['agent:read'] };
 
   beforeEach(() => {
-    mockPrisma.note.findFirst.mockReset();
-    mockPrisma.note.findMany.mockReset();
-    mockPrisma.link.findMany.mockReset();
+    mockNoteService.getNote.mockReset();
+    mockLinkService.getBacklinks.mockReset();
     const server = createMockServer();
     register(server, auth);
     handler = server.getHandler('get_backlinks');
   });
 
   test('returns backlinks with correct shape', async () => {
-    mockPrisma.note.findFirst.mockImplementation(() => ({ id: 'n1' }));
-    mockPrisma.link.findMany.mockImplementation(() => [
-      { fromId: 'n2' },
-      { fromId: 'n3' },
-    ]);
-    mockPrisma.note.findMany.mockImplementation(() => [
+    mockNoteService.getNote.mockImplementation(() => ({ id: 'n1' }));
+    mockLinkService.getBacklinks.mockImplementation(() => [
       { id: 'n2', slug: 'note-2', title: 'Note 2', tags: [{ name: 'tag1' }] },
       { id: 'n3', slug: 'note-3', title: 'Note 3', tags: [] },
     ]);
@@ -69,7 +69,7 @@ describe('get_backlinks', () => {
   });
 
   test('returns not-found error for missing note', async () => {
-    mockPrisma.note.findFirst.mockImplementation(() => null);
+    mockNoteService.getNote.mockImplementation(() => null);
 
     const result = await handler({ slug: 'nonexistent' });
     expect(result.isError).toBe(true);
@@ -78,8 +78,8 @@ describe('get_backlinks', () => {
   });
 
   test('returns empty array when no backlinks', async () => {
-    mockPrisma.note.findFirst.mockImplementation(() => ({ id: 'n1' }));
-    mockPrisma.link.findMany.mockImplementation(() => []);
+    mockNoteService.getNote.mockImplementation(() => ({ id: 'n1' }));
+    mockLinkService.getBacklinks.mockImplementation(() => []);
 
     const result = await handler({ slug: 'lonely-note' });
     const parsed = JSON.parse(result.content[0].text);

@@ -202,6 +202,24 @@ describe('renderToHtml', () => {
     expect(html).toContain('<a href="https://example.com">click</a>');
   });
 
+  test('sanitizes javascript links', () => {
+    const html = renderToHtml('[x](javascript:alert(1))');
+    expect(html).toContain('<a>x</a>');
+    expect(html).not.toContain('javascript:alert(1)');
+  });
+
+  test('sanitizes javascript image sources', () => {
+    const html = renderToHtml('![x](javascript:alert(1))');
+    expect(html).toContain('<img alt="x">');
+    expect(html).not.toContain('src="javascript:alert(1)"');
+  });
+
+  test('sanitizes raw HTML script and handler attributes', () => {
+    const html = renderToHtml('<script>alert(1)</script><img src="x" onerror="alert(1)" />');
+    expect(html).not.toContain('<script>');
+    expect(html).not.toContain('onerror=');
+  });
+
   test('does not include frontmatter in HTML output', () => {
     const md = `---\ntitle: Hidden\n---\nVisible content`;
     const html = renderToHtml(md);

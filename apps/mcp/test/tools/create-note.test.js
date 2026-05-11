@@ -1,33 +1,17 @@
 import { describe, test, expect, mock, beforeEach } from 'bun:test';
 
 const mockPrisma = {
-  directory: {
-    findFirst: mock(() => null),
-  },
-  note: {
-    findMany: mock(() => []),
+  activityLog: {
     create: mock(() => ({})),
   },
-  link: {
-    findMany: mock(() => []),
-    create: mock(() => ({})),
-    deleteMany: mock(() => ({})),
-    updateMany: mock(() => ({})),
-  },
-  $transaction: mock((fn) => fn(mockPrisma)),
+};
+const mockNoteService = {
+  createNote: mock(() => ({})),
 };
 
 mock.module('../../src/db.js', () => ({ prisma: mockPrisma }));
-mock.module('../../src/links.js', () => ({
-  reconcileLinks: mock(() => Promise.resolve()),
-  resolveUnresolvedLinks: mock(() => Promise.resolve()),
-}));
-mock.module('@mycelium/shared', () => ({
-  DEFAULT_PAGE_LIMIT: 20,
-  generateExcerpt: (c) => c?.slice(0, 100) ?? '',
-  extractWikilinks: () => [],
-  slugify: (t) => t.toLowerCase().replace(/\s+/g, '-'),
-  serializeFrontmatter: (fm, content) => `---\n---\n${content}`,
+mock.module('@mycelium/api/services/note.service.js', () => ({
+  NoteService: mockNoteService,
 }));
 
 const { register } = await import('../../src/tools/create-note.js');
@@ -49,15 +33,8 @@ describe('create_note', () => {
   const auth = { userId: 'u1', scopes: ['notes:write'], apiKeyId: 'ak1', apiKeyName: 'test-key' };
 
   beforeEach(() => {
-    mockPrisma.directory.findFirst.mockReset();
-    mockPrisma.note.findMany.mockReset();
-    mockPrisma.note.create.mockReset();
-    mockPrisma.link.findMany.mockReset();
-    mockPrisma.link.create.mockReset();
-    mockPrisma.link.deleteMany.mockReset();
-    mockPrisma.link.updateMany.mockReset();
-    mockPrisma.$transaction.mockReset();
-    mockPrisma.$transaction.mockImplementation((fn) => fn(mockPrisma));
+    mockPrisma.activityLog.create.mockReset();
+    mockNoteService.createNote.mockReset();
 
     const server = createMockServer();
     register(server, auth);
@@ -65,13 +42,14 @@ describe('create_note', () => {
   });
 
   test('returns created note with correct shape', async () => {
-    mockPrisma.note.findMany.mockImplementation(() => []);
-    mockPrisma.note.create.mockImplementation(() => ({
+    mockNoteService.createNote.mockImplementation(() => ({
       id: 'n1',
       slug: 'my-note',
       title: 'My Note',
       status: 'DRAFT',
       tags: [{ name: 'test' }],
+      directoryId: null,
+      directory: null,
     }));
 
     const result = await handler({ title: 'My Note', content: 'Some content', tags: ['test'] });
@@ -82,6 +60,15 @@ describe('create_note', () => {
     expect(parsed.title).toBe('My Note');
     expect(parsed.status).toBe('DRAFT');
     expect(parsed.tags).toEqual(['test']);
+    expect(mockNoteService.createNote.mock.calls[0][0]).toBe('u1');
+    expect(mockNoteService.createNote.mock.calls[0][1]).toMatchObject({
+      title: 'My Note',
+      content: 'Some content',
+      tags: ['test'],
+      authType: 'apikey',
+      apiKeyId: 'ak1',
+      apiKeyName: 'test-key',
+    });
   });
 
   test('rejects without notes:write scope', async () => {
@@ -96,13 +83,14 @@ describe('create_note', () => {
   });
 
   test('creates note with tags', async () => {
-    mockPrisma.note.findMany.mockImplementation(() => []);
-    mockPrisma.note.create.mockImplementation(() => ({
+    mockNoteService.createNote.mockImplementation(() => ({
       id: 'n2',
       slug: 'tagged-note',
       title: 'Tagged Note',
       status: 'PUBLISHED',
       tags: [{ name: 'alpha' }, { name: 'beta' }],
+      directoryId: null,
+      directory: null,
     }));
 
     const result = await handler({ title: 'Tagged Note', content: 'body', status: 'PUBLISHED', tags: ['alpha', 'beta'] });
@@ -112,13 +100,11 @@ describe('create_note', () => {
   });
 
   test('creates note in an owned directory', async () => {
-    mockPrisma.directory.findFirst.mockImplementation(() => ({ id: 'dir1' }));
-    mockPrisma.note.findMany.mockImplementation(() => []);
-    mockPrisma.note.create.mockImplementation(({ data }) => ({
+    mockNoteService.createNote.mockImplementation((userId, data) => ({
       id: 'n3',
       slug: 'directory-note',
-      title: data.title,
-      status: data.status,
+      title: 'Directory Note',
+      status: 'DRAFT',
       directoryId: data.directoryId,
       directory: { id: 'dir1', name: 'Projects', parentId: null },
       tags: [],
@@ -129,21 +115,22 @@ describe('create_note', () => {
     const parsed = JSON.parse(result.content[0].text);
     expect(parsed.directoryId).toBe('dir1');
     expect(parsed.directory).toEqual({ id: 'dir1', name: 'Projects', parentId: null });
-    expect(mockPrisma.note.create.mock.calls[0][0].data.directoryId).toBe('dir1');
+    expect(mockNoteService.createNote.mock.calls[0][1].directoryId).toBe('dir1');
   });
 
   test('rejects another user directory', async () => {
-    mockPrisma.directory.findFirst.mockImplementation(() => null);
+    mockNoteService.createNote.mockImplementation(() => {
+      throw { statusCode: 404, message: 'Directory not found' };
+    });
 
     const result = await handler({ title: 'Bad Directory', content: 'body', directoryId: 'other-dir' });
     expect(result.isError).toBe(true);
     const parsed = JSON.parse(result.content[0].text);
     expect(parsed.error).toBe('Directory not found');
-    expect(mockPrisma.note.create).not.toHaveBeenCalled();
   });
 
   test('handles database error gracefully', async () => {
-    mockPrisma.$transaction.mockImplementation(() => { throw new Error('DB down'); });
+    mockNoteService.createNote.mockImplementation(() => { throw new Error('DB down'); });
 
     const result = await handler({ title: 'Fail', content: 'body' });
     expect(result.isError).toBe(true);

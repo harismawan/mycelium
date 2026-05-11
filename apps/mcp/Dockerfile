@@ -12,14 +12,14 @@ RUN bun install --frozen-lockfile
 FROM deps AS build
 COPY packages/shared/ packages/shared/
 COPY apps/mcp/ apps/mcp/
-COPY apps/api/prisma apps/api/prisma
+COPY apps/api/ apps/api/
 RUN cd apps/api && DATABASE_URL=postgresql://postgres:postgres@localhost:5432/mycelium?schema=public bunx prisma generate
 
 FROM base AS runner
 COPY --from=build /app/node_modules node_modules
 COPY --from=build /app/packages/shared packages/shared
 COPY --from=build /app/apps/mcp apps/mcp
-COPY --from=build /app/apps/api/prisma apps/api/prisma
+COPY --from=build /app/apps/api apps/api
 
 WORKDIR /app/apps/mcp
 ENV NODE_ENV=production

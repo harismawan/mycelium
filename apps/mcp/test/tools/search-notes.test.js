@@ -1,10 +1,15 @@
 import { describe, test, expect, mock, beforeEach } from 'bun:test';
 
-const mockPrisma = {
-  $queryRaw: mock(() => []),
+const mockSearchService = {
+  search: mock(() => ({ notes: [], nextCursor: null })),
 };
 
-mock.module('../../src/db.js', () => ({ prisma: mockPrisma }));
+mock.module('@mycelium/api/services/search.service.js', () => ({
+  SearchService: mockSearchService,
+}));
+mock.module('../../src/db.js', () => ({
+  prisma: { activityLog: { create: mock(() => ({})) } },
+}));
 mock.module('@mycelium/shared', () => ({
   DEFAULT_PAGE_LIMIT: 20,
   generateExcerpt: (c) => c?.slice(0, 100) ?? '',
@@ -32,7 +37,7 @@ describe('search_notes', () => {
   const auth = { userId: 'u1', scopes: ['agent:read'] };
 
   beforeEach(() => {
-    mockPrisma.$queryRaw.mockReset();
+    mockSearchService.search.mockReset();
     const server = createMockServer();
     register(server, auth);
     handler = server.getHandler('search_notes');
@@ -43,18 +48,19 @@ describe('search_notes', () => {
       { id: 'n1', slug: 'hello-world', title: 'Hello World', excerpt: 'A greeting', status: 'PUBLISHED', rank: 0.85 },
       { id: 'n2', slug: 'test-note', title: 'Test Note', excerpt: null, status: 'DRAFT', rank: 0.5 },
     ];
-    mockPrisma.$queryRaw.mockImplementation(() => sampleResults);
+    mockSearchService.search.mockImplementation(() => ({ notes: sampleResults, nextCursor: 'next' }));
 
     const result = await handler({ query: 'hello', tag: undefined, status: undefined, limit: undefined });
     expect(result.isError).toBeUndefined();
     const parsed = JSON.parse(result.content[0].text);
-    expect(parsed).toHaveLength(2);
-    expect(parsed[0]).toHaveProperty('id');
-    expect(parsed[0]).toHaveProperty('slug');
-    expect(parsed[0]).toHaveProperty('title');
-    expect(parsed[0]).toHaveProperty('excerpt');
-    expect(parsed[0]).toHaveProperty('status');
-    expect(parsed[0]).toHaveProperty('rank');
+    expect(parsed.notes).toHaveLength(2);
+    expect(parsed.nextCursor).toBe('next');
+    expect(parsed.notes[0]).toHaveProperty('id');
+    expect(parsed.notes[0]).toHaveProperty('slug');
+    expect(parsed.notes[0]).toHaveProperty('title');
+    expect(parsed.notes[0]).toHaveProperty('excerpt');
+    expect(parsed.notes[0]).toHaveProperty('status');
+    expect(parsed.notes[0]).toHaveProperty('rank');
   });
 
   test('rejects without agent:read scope', async () => {
@@ -69,15 +75,15 @@ describe('search_notes', () => {
   });
 
   test('returns empty array for no matches', async () => {
-    mockPrisma.$queryRaw.mockImplementation(() => []);
+    mockSearchService.search.mockImplementation(() => ({ notes: [], nextCursor: null }));
 
     const result = await handler({ query: 'nonexistent' });
     const parsed = JSON.parse(result.content[0].text);
-    expect(parsed).toEqual([]);
+    expect(parsed).toEqual({ notes: [], nextCursor: null });
   });
 
   test('handles database error gracefully', async () => {
-    mockPrisma.$queryRaw.mockImplementation(() => { throw new Error('Connection lost'); });
+    mockSearchService.search.mockImplementation(() => { throw new Error('Connection lost'); });
 
     const result = await handler({ query: 'test' });
     expect(result.isError).toBe(true);

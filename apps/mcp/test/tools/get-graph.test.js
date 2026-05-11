@@ -1,16 +1,15 @@
 import { describe, test, expect, mock, beforeEach } from 'bun:test';
 
-const mockPrisma = {
-  note: {
-    findFirst: mock(() => null),
-    findMany: mock(() => []),
-  },
-  link: {
-    findMany: mock(() => []),
-  },
+const mockLinkService = {
+  getGraph: mock(() => ({ nodes: [], edges: [] })),
 };
 
-mock.module('../../src/db.js', () => ({ prisma: mockPrisma }));
+mock.module('@mycelium/api/services/link.service.js', () => ({
+  LinkService: mockLinkService,
+}));
+mock.module('../../src/db.js', () => ({
+  prisma: { activityLog: { create: mock(() => ({})) } },
+}));
 mock.module('@mycelium/shared', () => ({
   DEFAULT_PAGE_LIMIT: 20,
   generateExcerpt: (c) => c?.slice(0, 100) ?? '',
@@ -38,22 +37,20 @@ describe('get_graph', () => {
   const auth = { userId: 'u1', scopes: ['agent:read'] };
 
   beforeEach(() => {
-    mockPrisma.note.findFirst.mockReset();
-    mockPrisma.note.findMany.mockReset();
-    mockPrisma.link.findMany.mockReset();
+    mockLinkService.getGraph.mockReset();
     const server = createMockServer();
     register(server, auth);
     handler = server.getHandler('get_graph');
   });
 
   test('returns full graph with nodes and edges', async () => {
-    mockPrisma.note.findMany.mockImplementationOnce(() => [
-      { id: 'n1', slug: 'note-1', title: 'Note 1', status: 'PUBLISHED' },
-      { id: 'n2', slug: 'note-2', title: 'Note 2', status: 'DRAFT' },
-    ]);
-    mockPrisma.link.findMany.mockImplementationOnce(() => [
-      { fromId: 'n1', toId: 'n2', relation: null },
-    ]);
+    mockLinkService.getGraph.mockImplementation(() => ({
+      nodes: [
+        { id: 'n1', slug: 'note-1', title: 'Note 1', status: 'PUBLISHED' },
+        { id: 'n2', slug: 'note-2', title: 'Note 2', status: 'DRAFT' },
+      ],
+      edges: [{ fromId: 'n1', toId: 'n2', relation: null }],
+    }));
 
     const result = await handler({ slug: undefined, depth: 1 });
     expect(result.isError).toBeUndefined();
@@ -70,22 +67,13 @@ describe('get_graph', () => {
   });
 
   test('returns ego-subgraph when slug provided', async () => {
-    // findFirst for the start note
-    mockPrisma.note.findFirst.mockImplementation(() => ({
-      id: 'n1', slug: 'center', title: 'Center', status: 'PUBLISHED',
+    mockLinkService.getGraph.mockImplementation(() => ({
+      nodes: [
+        { id: 'n1', slug: 'center', title: 'Center', status: 'PUBLISHED' },
+        { id: 'n2', slug: 'neighbor', title: 'Neighbor', status: 'PUBLISHED' },
+      ],
+      edges: [{ fromId: 'n1', toId: 'n2', relation: 'related' }],
     }));
-    // First call: outgoing links from frontier
-    // Second call: incoming links to frontier
-    let linkCallCount = 0;
-    mockPrisma.link.findMany.mockImplementation(() => {
-      linkCallCount++;
-      if (linkCallCount === 1) return [{ fromId: 'n1', toId: 'n2', relation: 'related' }];
-      return [];
-    });
-    // Neighbor notes
-    mockPrisma.note.findMany.mockImplementation(() => [
-      { id: 'n2', slug: 'neighbor', title: 'Neighbor', status: 'PUBLISHED' },
-    ]);
 
     const result = await handler({ slug: 'center', depth: 1 });
     const parsed = JSON.parse(result.content[0].text);
@@ -94,7 +82,7 @@ describe('get_graph', () => {
   });
 
   test('returns empty graph when no notes', async () => {
-    mockPrisma.note.findMany.mockImplementation(() => []);
+    mockLinkService.getGraph.mockImplementation(() => ({ nodes: [], edges: [] }));
 
     const result = await handler({ slug: undefined, depth: 1 });
     const parsed = JSON.parse(result.content[0].text);
@@ -114,7 +102,7 @@ describe('get_graph', () => {
   });
 
   test('handles database error gracefully', async () => {
-    mockPrisma.note.findMany.mockImplementation(() => { throw new Error('Connection lost'); });
+    mockLinkService.getGraph.mockImplementation(() => { throw new Error('Connection lost'); });
 
     const result = await handler({ slug: undefined, depth: 1 });
     expect(result.isError).toBe(true);

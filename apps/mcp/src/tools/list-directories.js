@@ -1,8 +1,8 @@
+import { DirectoryService } from "@mycelium/api/services/directory.service.js";
 import { checkScopes } from "../auth.js";
 import { log } from "../logger.js";
 import { logMcpAction } from "../activity-log.js";
-import { prisma } from "../db.js";
-import { databaseError, toDirectoryTreeNode } from "../directories.js";
+import { databaseError } from "../directories.js";
 
 export function register(server, auth) {
   server.tool(
@@ -15,30 +15,7 @@ export function register(server, auth) {
 
       const start = performance.now();
       try {
-        const directories = await prisma.directory.findMany({
-          where: { userId: auth.userId },
-          include: {
-            _count: {
-              select: {
-                notes: {
-                  where: { status: { not: "ARCHIVED" } },
-                },
-              },
-            },
-          },
-          orderBy: [{ name: "asc" }, { id: "asc" }],
-        });
-
-        const nodes = new Map(directories.map((directory) => [directory.id, toDirectoryTreeNode(directory)]));
-        const roots = [];
-        for (const directory of directories) {
-          const node = nodes.get(directory.id);
-          if (directory.parentId && nodes.has(directory.parentId)) {
-            nodes.get(directory.parentId).children.push(node);
-          } else {
-            roots.push(node);
-          }
-        }
+        const result = await DirectoryService.listTree(auth.userId);
 
         await logMcpAction(auth, {
           action: "mcp:list_directories",
@@ -51,7 +28,7 @@ export function register(server, auth) {
           durationMs: performance.now() - start,
           success: true,
         });
-        return { content: [{ type: "text", text: JSON.stringify({ directories: roots }) }] };
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
       } catch (err) {
         await logMcpAction(auth, {
           action: "mcp:list_directories",

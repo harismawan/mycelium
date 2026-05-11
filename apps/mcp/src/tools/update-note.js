@@ -1,11 +1,9 @@
 import { z } from "zod";
-import { generateExcerpt, extractWikilinks, slugify } from "@mycelium/shared";
+import { NoteService } from "@mycelium/api/services/note.service.js";
 import { checkScopes } from "../auth.js";
 import { log } from "../logger.js";
 import { logMcpAction } from "../activity-log.js";
-import { prisma } from "../db.js";
-import { businessError, ensureDirectory, handleDirectoryError, toDirectorySummary } from "../directories.js";
-import { reconcileLinks, resolveUnresolvedLinks } from "../links.js";
+import { handleDirectoryError, toDirectorySummary } from "../directories.js";
 
 /**
  * Register the `update_note` tool on the MCP server.
@@ -44,18 +42,45 @@ export function register(server, auth) {
 
       const start = performance.now();
       try {
-        // Find existing note
-        const existing = await prisma.note.findFirst({
-          where: { slug, userId: auth.userId },
-          include: { tags: true },
+        const { note } = await NoteService.updateNote(auth.userId, slug, {
+          title: newTitle,
+          content: newContent,
+          status: newStatus,
+          tags,
+          directoryId,
+          message,
+          authType: "apikey",
+          apiKeyId: auth.apiKeyId,
+          apiKeyName: auth.apiKeyName,
         });
 
-        if (!existing) {
+        const result = {
+          id: note.id,
+          slug: note.slug,
+          title: note.title,
+          status: note.status,
+          directoryId: note.directoryId,
+          directory: toDirectorySummary(note.directory),
+          tags: note.tags.map((t) => t.name),
+        };
+
+        await logMcpAction(auth, {
+          action: "mcp:update_note",
+          status: "success",
+          details: { durationMs: performance.now() - start, success: true },
+        });
+
+        log("info", "tool.call", {
+          tool: "update_note",
+          durationMs: performance.now() - start,
+          success: true,
+        });
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      } catch (err) {
+        if (err.statusCode === 404 && err.message === "Note not found") {
           await logMcpAction(auth, {
             action: "mcp:update_note",
-
             status: "success",
-
             details: { durationMs: performance.now() - start, success: true },
           });
 
@@ -75,118 +100,9 @@ export function register(server, auth) {
           };
         }
 
-        // Merge fields
-        const title = newTitle ?? existing.title;
-        const content = newContent ?? existing.content;
-        const status = newStatus ?? existing.status;
-        if (directoryId !== undefined) {
-          await ensureDirectory(auth.userId, directoryId);
-        }
-
-        const excerpt = generateExcerpt(content);
-        const wikilinks = extractWikilinks(content);
-
-        // Re-generate slug if title changed
-        let updatedSlug = existing.slug;
-        if (newTitle && newTitle !== existing.title) {
-          const baseSlug = slugify(newTitle);
-          const others = await prisma.note.findMany({
-            where: { slug: { startsWith: baseSlug }, id: { not: existing.id } },
-            select: { slug: true },
-          });
-          const existingSlugs = new Set(others.map((n) => n.slug));
-          updatedSlug = baseSlug;
-          if (existingSlugs.has(updatedSlug)) {
-            let counter = 1;
-            while (existingSlugs.has(`${updatedSlug}-${counter}`)) counter++;
-            updatedSlug = `${updatedSlug}-${counter}`;
-          }
-        }
-
-        /** @type {Record<string, unknown>} */
-        const updateData = {
-          title,
-          content,
-          slug: updatedSlug,
-          excerpt,
-          status,
-        };
-
-        if (directoryId !== undefined) {
-          updateData.directoryId = directoryId;
-        }
-
-        // Handle tags: disconnect all existing, then connect-or-create new ones
-        if (tags !== undefined) {
-          updateData.tags = {
-            set: [],
-            connectOrCreate: tags.map((name) => ({
-              where: { name },
-              create: { name },
-            })),
-          };
-        }
-
-        const contentChanged = content !== existing.content;
-
-        const note = await prisma.$transaction(async (tx) => {
-          const updated = await tx.note.update({
-            where: { id: existing.id },
-            data: {
-              ...updateData,
-              ...(contentChanged
-                ? {
-                    revisions: {
-                      create: {
-                        content,
-                        message,
-                        authType: "apikey",
-                        apiKeyId: auth.apiKeyId,
-                        apiKeyName: auth.apiKeyName,
-                      },
-                    },
-                  }
-                : {}),
-            },
-            include: { tags: true, directory: { select: { id: true, name: true, parentId: true } } },
-          });
-
-          await reconcileLinks(tx, updated.id, wikilinks, auth.userId);
-          await resolveUnresolvedLinks(tx, updated.id, title);
-
-          return updated;
-        });
-
-        const result = {
-          id: note.id,
-          slug: note.slug,
-          title: note.title,
-          status: note.status,
-          directoryId: note.directoryId,
-          directory: toDirectorySummary(note.directory),
-          tags: note.tags.map((t) => t.name),
-        };
-
         await logMcpAction(auth, {
           action: "mcp:update_note",
-
-          status: "success",
-
-          details: { durationMs: performance.now() - start, success: true },
-        });
-
-        log("info", "tool.call", {
-          tool: "update_note",
-          durationMs: performance.now() - start,
-          success: true,
-        });
-        return { content: [{ type: "text", text: JSON.stringify(result) }] };
-      } catch (err) {
-        await logMcpAction(auth, {
-          action: "mcp:update_note",
-
           status: "error",
-
           details: {
             durationMs: performance.now() - start,
             success: false,
@@ -200,7 +116,6 @@ export function register(server, auth) {
           success: false,
           error: err.message,
         });
-        if (err.code === "DIRECTORY_NOT_FOUND") return businessError("Directory not found");
         return handleDirectoryError(err);
       }
     },

@@ -157,6 +157,43 @@ export const LinkService = {
   },
 
   /**
+   * Get all outgoing wikilinks from a note, split into resolved and unresolved.
+   *
+   * @param {string} noteId - The source note ID.
+   * @returns {Promise<{ resolved: Array<{ id: string, slug: string, title: string }>, unresolved: Array<{ title: string }> }>}
+   */
+  async getOutgoingLinks(noteId) {
+    const links = await prisma.link.findMany({
+      where: { fromId: noteId },
+      select: { toId: true, toTitle: true },
+    });
+
+    const resolvedLinks = links.filter((link) => link.toId !== null);
+    const unresolved = links
+      .filter((link) => link.toId === null && link.toTitle)
+      .map((link) => ({ title: link.toTitle }));
+
+    if (!resolvedLinks.length) {
+      return { resolved: [], unresolved };
+    }
+
+    const toIds = [...new Set(resolvedLinks.map((link) => link.toId))];
+    const targetNotes = await prisma.note.findMany({
+      where: { id: { in: toIds } },
+      select: { id: true, slug: true, title: true },
+    });
+
+    return {
+      resolved: targetNotes.map((note) => ({
+        id: note.id,
+        slug: note.slug,
+        title: note.title,
+      })),
+      unresolved,
+    };
+  },
+
+  /**
    * @typedef {Object} GraphNode
    * @property {string} id
    * @property {string} slug

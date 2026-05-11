@@ -52,6 +52,10 @@ beforeEach(() => {
 // SearchService
 // ===========================================================================
 describe('SearchService.search', () => {
+  function decodeCursor(cursor) {
+    return JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'));
+  }
+
   /** Validates: Requirements 6.2 */
   test('returns ranked search results from $queryRaw', async () => {
     const results = [
@@ -103,7 +107,7 @@ describe('SearchService.search', () => {
     const out = await SearchService.search(userId, 'test', { limit: 3 });
 
     expect(out.notes).toHaveLength(3);
-    expect(out.nextCursor).toBe('n2');
+    expect(decodeCursor(out.nextCursor)).toEqual({ rank: 0.8, id: 'n2' });
   });
 
   /** Validates: Requirements 6.4 */
@@ -119,12 +123,16 @@ describe('SearchService.search', () => {
     expect(out.nextCursor).toBeNull();
   });
 
-  test('passes cursor filter when cursor is provided', async () => {
+  test('uses compound rank and id cursor filter when cursor is provided', async () => {
     mockQueryRaw.mockResolvedValue([]);
 
-    await SearchService.search(userId, 'test', { cursor: 'cursor_abc' });
+    const cursor = Buffer.from(JSON.stringify({ rank: 0.8, id: 'cursor_abc' })).toString('base64url');
+    await SearchService.search(userId, 'test', { cursor });
 
     expect(mockQueryRaw).toHaveBeenCalledTimes(1);
+    const queryValues = JSON.stringify(mockQueryRaw.mock.calls[0]);
+    expect(queryValues).toContain('0.8');
+    expect(queryValues).toContain('cursor_abc');
   });
 
   test('uses DEFAULT_PAGE_LIMIT when no limit provided', async () => {
@@ -137,7 +145,7 @@ describe('SearchService.search', () => {
     const out = await SearchService.search(userId, 'test');
 
     expect(out.notes).toHaveLength(20);
-    expect(out.nextCursor).toBe('n19');
+    expect(decodeCursor(out.nextCursor)).toEqual({ rank: 1, id: 'n19' });
   });
 });
 

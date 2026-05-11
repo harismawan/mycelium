@@ -4,9 +4,8 @@ on:
   workflow_dispatch:
     inputs:
       image_tag:
-        description: "Image tag to deploy (defaults to latest)"
-        required: false
-        default: "latest"
+        description: "Immutable image tag to deploy (required, e.g. 1.2.3)"
+        required: true
       apply_manifest:
         description: "Apply k8s manifests first (true/false)"
         required: false
@@ -37,8 +36,9 @@ jobs:
         id: set-tag
         run: |
           TAG="${{ github.event.inputs.image_tag }}"
-          if [ -z "$TAG" ] || [ "$TAG" = "latest" ]; then
-            TAG="latest"
+          if [ -z "$TAG" ]; then
+            echo "image_tag is required and must be immutable (example: 1.2.3)"
+            exit 1
           fi
           echo "tag=$TAG" >> $GITHUB_OUTPUT
           echo "Deploying with image tag: $TAG"

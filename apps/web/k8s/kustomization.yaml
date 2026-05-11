@@ -5,3 +5,7 @@ resources:
   - service.yaml
   - ingress.yaml
   - hpa.yaml
+
+images:
+  - name: ghcr.io/harismawan/mycelium-web
+    newTag: 0.0.0

@@ -53,6 +53,15 @@ export const NoteResponse = t.Object({
     description: 'Publication status',
   }),
   pinned: t.Boolean({ description: 'Whether the note is pinned' }),
+  directoryId: t.Union([t.String(), t.Null()], { description: 'Containing directory ID or null' }),
+  directory: t.Union([
+    t.Object({
+      id: t.String(),
+      name: t.String(),
+      parentId: t.Union([t.String(), t.Null()]),
+    }),
+    t.Null(),
+  ], { description: 'Containing directory summary or null' }),
   createdAt: t.Date({ description: 'Creation timestamp' }),
   updatedAt: t.Date({ description: 'Last update timestamp' }),
   tags: t.Array(t.Object({ id: t.String(), name: t.String() }), {
@@ -73,6 +82,21 @@ export const NoteCountResponse = t.Object({
   draft: t.Number({ description: 'Number of draft notes' }),
   published: t.Number({ description: 'Number of published notes' }),
   archived: t.Number({ description: 'Number of archived notes' }),
+});
+
+// ─── Directory Responses ────────────────────────────────────────────────────
+
+export const DirectoryResponse = t.Object({
+  id: t.String({ description: 'Directory ID' }),
+  name: t.String({ description: 'Directory name' }),
+  parentId: t.Union([t.String(), t.Null()], { description: 'Parent directory ID or null' }),
+  userId: t.String({ description: 'Owning user ID' }),
+  createdAt: t.Date({ description: 'Creation timestamp' }),
+  updatedAt: t.Date({ description: 'Last update timestamp' }),
+});
+
+export const DirectoryTreeResponse = t.Object({
+  directories: t.Array(t.Any(), { description: 'Nested directory tree with direct note counts' }),
 });
 
 /** Full-text search results with relevance rank */

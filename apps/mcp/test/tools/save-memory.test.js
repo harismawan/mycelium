@@ -1,6 +1,10 @@
 import { describe, test, expect, mock, beforeEach } from 'bun:test';
 
 const mockPrisma = {
+  directory: {
+    findFirst: mock(() => null),
+    create: mock(() => ({})),
+  },
   note: {
     findMany: mock(() => []),
     create: mock(() => ({})),
@@ -47,6 +51,8 @@ describe('save_memory', () => {
   const auth = { userId: 'u1', scopes: ['notes:write'] };
 
   beforeEach(() => {
+    mockPrisma.directory.findFirst.mockReset();
+    mockPrisma.directory.create.mockReset();
     mockPrisma.note.findMany.mockReset();
     mockPrisma.note.create.mockReset();
     mockPrisma.link.findMany.mockReset();
@@ -62,6 +68,7 @@ describe('save_memory', () => {
   });
 
   test('creates note with PUBLISHED status and agent-memory tag', async () => {
+    mockPrisma.directory.findFirst.mockImplementation(() => ({ id: 'memories-dir' }));
     mockPrisma.note.findMany.mockImplementation(() => []);
     mockPrisma.note.create.mockImplementation(({ data }) => ({
       id: 'n1',
@@ -80,11 +87,13 @@ describe('save_memory', () => {
     // Verify the create call used PUBLISHED status and agent-memory tag
     const createCall = mockPrisma.note.create.mock.calls[0][0];
     expect(createCall.data.status).toBe('PUBLISHED');
+    expect(createCall.data.directoryId).toBe('memories-dir');
     const tagNames = createCall.data.tags.connectOrCreate.map((t) => t.create.name);
     expect(tagNames).toContain('agent-memory');
   });
 
   test('merges custom tags with agent-memory', async () => {
+    mockPrisma.directory.findFirst.mockImplementation(() => ({ id: 'memories-dir' }));
     mockPrisma.note.findMany.mockImplementation(() => []);
     mockPrisma.note.create.mockImplementation(({ data }) => ({
       id: 'n2',
@@ -105,6 +114,7 @@ describe('save_memory', () => {
   });
 
   test('deduplicates agent-memory when already provided in tags', async () => {
+    mockPrisma.directory.findFirst.mockImplementation(() => ({ id: 'memories-dir' }));
     mockPrisma.note.findMany.mockImplementation(() => []);
     mockPrisma.note.create.mockImplementation(({ data }) => ({
       id: 'n3',
@@ -125,6 +135,7 @@ describe('save_memory', () => {
   });
 
   test('returns only id and slug', async () => {
+    mockPrisma.directory.findFirst.mockImplementation(() => ({ id: 'memories-dir' }));
     mockPrisma.note.findMany.mockImplementation(() => []);
     mockPrisma.note.create.mockImplementation(() => ({
       id: 'n4',
@@ -150,6 +161,28 @@ describe('save_memory', () => {
     expect(result.isError).toBe(true);
     const parsed = JSON.parse(result.content[0].text);
     expect(parsed.error).toBe('Insufficient permissions');
+  });
+
+  test('creates the memories directory when missing', async () => {
+    mockPrisma.directory.findFirst.mockImplementation(() => null);
+    mockPrisma.directory.create.mockImplementation(({ data }) => ({ id: 'new-memories-dir', ...data }));
+    mockPrisma.note.findMany.mockImplementation(() => []);
+    mockPrisma.note.create.mockImplementation(({ data }) => ({
+      id: 'n5',
+      slug: data.slug,
+      title: data.title,
+      status: data.status,
+      tags: data.tags.connectOrCreate.map((t) => ({ name: t.create.name })),
+    }));
+
+    const result = await handler({ title: 'Memory', content: 'body' });
+    expect(result.isError).toBeUndefined();
+    expect(mockPrisma.directory.create.mock.calls[0][0].data).toMatchObject({
+      name: 'memories',
+      parentId: null,
+      userId: 'u1',
+    });
+    expect(mockPrisma.note.create.mock.calls[0][0].data.directoryId).toBe('new-memories-dir');
   });
 
   test('rejects empty title with validation error', () => {

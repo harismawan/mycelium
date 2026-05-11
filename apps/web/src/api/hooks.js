@@ -22,6 +22,9 @@ export const noteKeys = {
 
 export const tagKeys = { all: /** @type {const} */ (['tags']) };
 
+/** @type {{ all: string[] }} */
+export const directoryKeys = { all: ['directories'] };
+
 /** @type {{ all: string[], ego: (slug: string, depth: number) => (string | number)[] }} */
 export const graphKeys = {
   all: ['graph'],
@@ -56,6 +59,8 @@ export const activityKeys = {
  * @param {string} [filters.tag]
  * @param {string} [filters.q]
  * @param {boolean} [filters.pinned]
+ * @param {string} [filters.directoryId]
+ * @param {boolean} [filters.unfiled]
  */
 export function useNotes(filters = {}) {
   const params = new URLSearchParams();
@@ -65,6 +70,8 @@ export function useNotes(filters = {}) {
   if (filters.tag) params.set('tag', filters.tag);
   if (filters.q) params.set('q', filters.q);
   if (filters.pinned) params.set('pinned', 'true');
+  if (filters.directoryId) params.set('directoryId', filters.directoryId);
+  if (filters.unfiled) params.set('unfiled', 'true');
   const qs = params.toString();
   return useQuery({
     queryKey: noteKeys.lists(filters),
@@ -120,6 +127,13 @@ export function useTags() {
   });
 }
 
+export function useDirectories() {
+  return useQuery({
+    queryKey: directoryKeys.all,
+    queryFn: () => apiGet('/directories'),
+  });
+}
+
 /**
  * Fetch the knowledge graph.
  * When `slug` is provided, returns the ego-subgraph at the given depth.
@@ -168,15 +182,16 @@ export function useSearch(query, options = {}) {
 
 /**
  * Create a new note.
- * Invalidates the notes list and tags on success.
+ * Invalidates the notes list, directories, and tags on success.
  */
 export function useCreateNote() {
   const qc = useQueryClient();
   return useMutation({
-    /** @param {{ title: string, content: string, status?: string, tags?: string[] }} data */
+    /** @param {{ title: string, content: string, status?: string, tags?: string[], directoryId?: string | null }} data */
     mutationFn: (data) => apiPost('/notes', data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: noteKeys.all });
+      qc.invalidateQueries({ queryKey: directoryKeys.all });
       qc.invalidateQueries({ queryKey: tagKeys.all });
       qc.invalidateQueries({ queryKey: graphKeys.all });
     },
@@ -185,13 +200,13 @@ export function useCreateNote() {
 
 /**
  * Update an existing note.
- * Invalidates the note detail, list, tags, and graph on success.
+ * Invalidates the note detail, list, directories, tags, and graph on success.
  * @param {string} slug
  */
 export function useUpdateNote(slug) {
   const qc = useQueryClient();
   return useMutation({
-    /** @param {{ title?: string, content?: string, status?: string, tags?: string[], message?: string }} data */
+    /** @param {{ title?: string, content?: string, status?: string, tags?: string[], directoryId?: string | null, message?: string, pinned?: boolean }} data */
     mutationFn: (data) => apiPatch(`/notes/${slug}`, data),
     onMutate: async (data) => {
       await qc.cancelQueries({ queryKey: noteKeys.detail(slug) });
@@ -208,6 +223,7 @@ export function useUpdateNote(slug) {
       qc.invalidateQueries({ queryKey: noteKeys.detail(slug) });
       qc.invalidateQueries({ queryKey: noteKeys.md(slug) });
       qc.invalidateQueries({ queryKey: noteKeys.all });
+      qc.invalidateQueries({ queryKey: directoryKeys.all });
       qc.invalidateQueries({ queryKey: tagKeys.all });
       qc.invalidateQueries({ queryKey: graphKeys.all });
       qc.invalidateQueries({ queryKey: revKeys.list(slug) });
@@ -218,7 +234,7 @@ export function useUpdateNote(slug) {
 
 /**
  * Archive (soft-delete) a note.
- * Invalidates notes list, tags, and graph on success.
+ * Invalidates notes list, directories, tags, and graph on success.
  * @param {string} slug
  */
 export function useArchiveNote(slug) {
@@ -238,8 +254,43 @@ export function useArchiveNote(slug) {
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: noteKeys.all });
+      qc.invalidateQueries({ queryKey: directoryKeys.all });
       qc.invalidateQueries({ queryKey: tagKeys.all });
       qc.invalidateQueries({ queryKey: graphKeys.all });
+    },
+  });
+}
+
+export function useCreateDirectory() {
+  const qc = useQueryClient();
+  return useMutation({
+    /** @param {{ name: string, parentId?: string | null }} data */
+    mutationFn: (data) => apiPost('/directories', data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: directoryKeys.all });
+    },
+  });
+}
+
+export function useUpdateDirectory() {
+  const qc = useQueryClient();
+  return useMutation({
+    /** @param {{ id: string, name?: string, parentId?: string | null }} data */
+    mutationFn: ({ id, ...data }) => apiPatch(`/directories/${id}`, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: directoryKeys.all });
+    },
+  });
+}
+
+export function useDeleteDirectory() {
+  const qc = useQueryClient();
+  return useMutation({
+    /** @param {string} id */
+    mutationFn: (id) => apiDelete(`/directories/${id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: directoryKeys.all });
+      qc.invalidateQueries({ queryKey: noteKeys.all });
     },
   });
 }

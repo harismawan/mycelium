@@ -4,6 +4,7 @@ import { checkScopes } from "../auth.js";
 import { log } from "../logger.js";
 import { logMcpAction } from "../activity-log.js";
 import { prisma } from "../db.js";
+import { toDirectorySummary } from "../directories.js";
 
 /**
  * Register the `read_note` tool on the MCP server.
@@ -29,7 +30,7 @@ export function register(server, auth) {
       try {
         const note = await prisma.note.findFirst({
           where: { slug, userId: auth.userId },
-          include: { tags: true },
+          include: { tags: true, directory: { select: { id: true, name: true, parentId: true } } },
         });
 
         if (!note) {
@@ -65,6 +66,7 @@ export function register(server, auth) {
             title: note.title,
             status: note.status,
             tags: note.tags.map((t) => t.name),
+            directoryId: note.directoryId,
           };
           result = serializeFrontmatter(fm, note.content);
         } else {
@@ -76,6 +78,8 @@ export function register(server, auth) {
             excerpt: note.excerpt,
             status: note.status,
             tags: note.tags.map((t) => t.name),
+            directoryId: note.directoryId,
+            directory: toDirectorySummary(note.directory),
             updatedAt: note.updatedAt.toISOString(),
           });
         }

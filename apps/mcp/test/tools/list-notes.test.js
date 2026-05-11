@@ -43,8 +43,8 @@ describe('list_notes', () => {
   test('returns notes with correct output shape', async () => {
     const now = new Date();
     mockPrisma.note.findMany.mockImplementation(() => [
-      { id: 'n1', slug: 'note-1', title: 'Note 1', excerpt: 'Excerpt 1', status: 'PUBLISHED', tags: [{ name: 'tag1' }], updatedAt: now },
-      { id: 'n2', slug: 'note-2', title: 'Note 2', excerpt: null, status: 'DRAFT', tags: [], updatedAt: now },
+      { id: 'n1', slug: 'note-1', title: 'Note 1', excerpt: 'Excerpt 1', status: 'PUBLISHED', directoryId: 'dir1', directory: { id: 'dir1', name: 'Projects', parentId: null }, tags: [{ name: 'tag1' }], updatedAt: now },
+      { id: 'n2', slug: 'note-2', title: 'Note 2', excerpt: null, status: 'DRAFT', directoryId: null, directory: null, tags: [], updatedAt: now },
     ]);
 
     const result = await handler({});
@@ -57,6 +57,8 @@ describe('list_notes', () => {
     expect(parsed.notes[0]).toHaveProperty('excerpt');
     expect(parsed.notes[0]).toHaveProperty('status');
     expect(parsed.notes[0]).toHaveProperty('tags');
+    expect(parsed.notes[0]).toHaveProperty('directoryId');
+    expect(parsed.notes[0]).toHaveProperty('directory');
     expect(parsed.notes[0]).toHaveProperty('updatedAt');
     expect(parsed.nextCursor).toBeNull();
   });
@@ -101,5 +103,28 @@ describe('list_notes', () => {
     expect(parsed.nextCursor).toBeNull();
     // Verify findMany was called (filter delegation)
     expect(mockPrisma.note.findMany).toHaveBeenCalled();
+  });
+
+  test('sorts pinned notes first, then by most recently updated', async () => {
+    mockPrisma.note.findMany.mockImplementation(() => []);
+
+    await handler({});
+
+    const findCall = mockPrisma.note.findMany.mock.calls[0][0];
+    expect(findCall.orderBy).toEqual([
+      { pinned: 'desc' },
+      { updatedAt: 'desc' },
+      { id: 'asc' },
+    ]);
+  });
+
+  test('filters by directory and unfiled notes', async () => {
+    mockPrisma.note.findMany.mockImplementation(() => []);
+
+    await handler({ directoryId: 'dir1' });
+    expect(mockPrisma.note.findMany.mock.calls[0][0].where.directoryId).toBe('dir1');
+
+    await handler({ unfiled: true });
+    expect(mockPrisma.note.findMany.mock.calls[1][0].where.directoryId).toBeNull();
   });
 });

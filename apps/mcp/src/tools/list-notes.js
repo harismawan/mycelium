@@ -21,10 +21,12 @@ export function register(server, auth) {
       status: z.enum(["DRAFT", "PUBLISHED", "ARCHIVED"]).optional(),
       tag: z.string().optional(),
       query: z.string().optional(),
+      directoryId: z.string().optional(),
+      unfiled: z.boolean().optional(),
       cursor: z.string().optional(),
       limit: z.number().int().min(1).max(100).optional(),
     },
-    async ({ status, tag, query, cursor, limit }) => {
+    async ({ status, tag, query, directoryId, unfiled, cursor, limit }) => {
       const scopeError = checkScopes(["agent:read"], auth.scopes);
       if (scopeError) return scopeError;
 
@@ -52,12 +54,18 @@ export function register(server, auth) {
           ];
         }
 
+        if (unfiled) {
+          where.directoryId = null;
+        } else if (directoryId) {
+          where.directoryId = directoryId;
+        }
+
         const notes = await prisma.note.findMany({
           where,
           take: take + 1,
           ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-          orderBy: { createdAt: "desc" },
-          include: { tags: true },
+          orderBy: [{ pinned: "desc" }, { updatedAt: "desc" }, { id: "asc" }],
+          include: { tags: true, directory: { select: { id: true, name: true, parentId: true } } },
         });
 
         const hasMore = notes.length > take;
@@ -71,6 +79,10 @@ export function register(server, auth) {
             excerpt: n.excerpt,
             status: n.status,
             tags: n.tags.map((t) => t.name),
+            directoryId: n.directoryId,
+            directory: n.directory
+              ? { id: n.directory.id, name: n.directory.name, parentId: n.directory.parentId }
+              : null,
             updatedAt: n.updatedAt.toISOString(),
           })),
           nextCursor: hasMore ? notes[notes.length - 1].id : null,

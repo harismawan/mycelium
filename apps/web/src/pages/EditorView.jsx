@@ -1,7 +1,7 @@
 import { useEffect, useCallback, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import styled from 'styled-components';
-import { Code, Star, Save, PanelRight } from 'lucide-react';
+import { Code, Pin, Save, PanelRight } from 'lucide-react';
 import { useNote, useUpdateNote } from '../api/hooks.js';
 import { useNotesStore } from '../stores/notesStore.js';
 import { useEditorStore } from '../stores/editorStore.js';
@@ -235,11 +235,12 @@ export default function EditorView() {
           <Code size={15} />
         </ToolbarButton>
         <ToolbarButton
+          $active={isPinned}
           onClick={() => slug && updateNote.mutate({ pinned: !isPinned })}
           aria-label={isPinned ? 'Unpin note' : 'Pin note'}
           title={isPinned ? 'Unpin' : 'Pin'}
         >
-          <Star size={15} fill={isPinned ? 'currentColor' : 'none'} />
+          <Pin size={15} />
         </ToolbarButton>
         <ToolbarButton
           onClick={handleSave}

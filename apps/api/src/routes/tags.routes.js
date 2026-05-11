@@ -90,7 +90,7 @@ export const tagRoutes = new Elysia({ prefix: '/api/v1/tags' })
         include: { tags: true },
         take: limit + 1,
         ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ pinned: 'desc' }, { updatedAt: 'desc' }, { id: 'asc' }],
       });
 
       const hasMore = notes.length > limit;

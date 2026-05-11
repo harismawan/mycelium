@@ -4,6 +4,10 @@ import fc from 'fast-check';
 // ─── Shared mocks ────────────────────────────────────────────────────────────
 
 const mockPrisma = {
+  directory: {
+    findFirst: mock(() => ({ id: 'memories-dir' })),
+    create: mock(() => ({ id: 'memories-dir' })),
+  },
   note: {
     findFirst: mock(() => null),
     findMany: mock(() => []),
@@ -182,6 +186,10 @@ describe('Feature: mcp-server, Property 9: get_context returns relevant or recen
 
 describe('Feature: mcp-server, Property 10: save_memory always includes agent-memory tag and PUBLISHED status', () => {
   beforeEach(() => {
+    mockPrisma.directory.findFirst.mockReset();
+    mockPrisma.directory.create.mockReset();
+    mockPrisma.directory.findFirst.mockImplementation(() => ({ id: 'memories-dir' }));
+    mockPrisma.directory.create.mockImplementation(() => ({ id: 'memories-dir' }));
     mockPrisma.note.findMany.mockReset();
     mockPrisma.note.create.mockReset();
     mockPrisma.$transaction.mockReset();
@@ -203,6 +211,7 @@ describe('Feature: mcp-server, Property 10: save_memory always includes agent-me
         async (title, content, tags) => {
           // Track what gets passed to prisma.note.create
           let capturedData = null;
+          mockPrisma.directory.findFirst.mockImplementation(() => ({ id: 'memories-dir' }));
           mockPrisma.note.findMany.mockImplementation(() => []);
           mockPrisma.note.create.mockImplementation(({ data }) => {
             capturedData = data;
@@ -227,6 +236,7 @@ describe('Feature: mcp-server, Property 10: save_memory always includes agent-me
 
           // Status is always PUBLISHED
           expect(capturedData.status).toBe('PUBLISHED');
+          expect(capturedData.directoryId).toBe('memories-dir');
 
           // Tags always include agent-memory
           const tagNames = capturedData.tags.connectOrCreate.map((t) => t.create.name);
@@ -261,6 +271,7 @@ describe('Feature: mcp-server, Property 10: save_memory always includes agent-me
           const userTags = ['agent-memory', ...extraTags];
 
           let capturedData = null;
+          mockPrisma.directory.findFirst.mockImplementation(() => ({ id: 'memories-dir' }));
           mockPrisma.note.findMany.mockImplementation(() => []);
           mockPrisma.note.create.mockImplementation(({ data }) => {
             capturedData = data;

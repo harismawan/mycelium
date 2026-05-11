@@ -92,6 +92,15 @@ mock.module('../../src/services/activity-log.service.js', () => ({
   },
 }));
 
+mock.module('../../src/services/directory.service.js', () => ({
+  DirectoryService: {
+    listTree: async () => ({ directories: [] }),
+    createDirectory: async () => ({}),
+    updateDirectory: async () => ({}),
+    deleteDirectory: async () => ({ message: 'Directory deleted' }),
+  },
+}));
+
 // ---------------------------------------------------------------------------
 // Import the app AFTER mocks are registered
 // ---------------------------------------------------------------------------
@@ -165,12 +174,13 @@ describe('OpenAPI Spec — Smoke Tests', () => {
     expect(desc.toLowerCase()).toContain('ai agent');
   });
 
-  test('tags array contains all 8 tags in correct order', () => {
+  test('tags array contains all 9 tags in correct order', () => {
     const expectedTags = [
       'Health',
       'Auth',
       'Notes',
       'Tags',
+      'Directories',
       'Graph',
       'Agent',
       'API Keys',
@@ -242,6 +252,14 @@ describe('OpenAPI Spec — Tag Assignment', () => {
     expect(tagOps.length).toBeGreaterThan(0);
     for (const op of tagOps) {
       expect(op.tags).toContain('Tags');
+    }
+  });
+
+  test('all /api/v1/directories/* operations tagged "Directories"', () => {
+    const directoryOps = getOperationsByPrefix(operations, '/api/v1/directories');
+    expect(directoryOps.length).toBeGreaterThan(0);
+    for (const op of directoryOps) {
+      expect(op.tags).toContain('Directories');
     }
   });
 
@@ -335,8 +353,8 @@ describe('OpenAPI Spec — Security Assignment', () => {
     }
   });
 
-  test('Notes, tags, graph, activity-log routes reference both cookieAuth and bearerApiKey', () => {
-    const prefixes = ['/api/v1/notes', '/api/v1/tags', '/api/v1/graph', '/api/v1/activity-log'];
+  test('Notes, tags, directories, graph, activity-log routes reference both cookieAuth and bearerApiKey', () => {
+    const prefixes = ['/api/v1/notes', '/api/v1/tags', '/api/v1/directories', '/api/v1/graph', '/api/v1/activity-log'];
     const expectedSecurity = [{ cookieAuth: [] }, { bearerApiKey: [] }];
 
     for (const prefix of prefixes) {
@@ -394,7 +412,7 @@ describe('OpenAPI Spec — Operation Metadata Completeness', () => {
     expect(uniqueIds.size).toBe(ids.length);
   });
 
-  test('total count of operations matches expected (32 endpoints)', () => {
-    expect(operations.length).toBe(32);
+  test('total count of operations matches expected (36 endpoints)', () => {
+    expect(operations.length).toBe(36);
   });
 });

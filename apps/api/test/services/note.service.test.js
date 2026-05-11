@@ -9,6 +9,9 @@ const mockNote = {
   findFirst: mock(() => null),
   update: mock(() => ({})),
 };
+const mockDirectory = {
+  findFirst: mock(() => null),
+};
 const mockLink = {
   findMany: mock(() => []),
   deleteMany: mock(() => ({ count: 0 })),
@@ -30,6 +33,7 @@ const mockTransaction = mock(async (arg) => {
   }
   return arg({
     note: mockNote,
+    directory: mockDirectory,
     link: mockLink,
     tag: mockTag,
     revision: mockRevision,
@@ -40,6 +44,7 @@ mock.module('@prisma/client', () => ({
   PrismaClient: class {
     constructor() {
       this.note = mockNote;
+      this.directory = mockDirectory;
       this.link = mockLink;
       this.tag = mockTag;
       this.revision = mockRevision;
@@ -83,6 +88,7 @@ beforeEach(() => {
   mockNote.findMany.mockReset();
   mockNote.findFirst.mockReset();
   mockNote.update.mockReset();
+  mockDirectory.findFirst.mockReset();
   mockLink.findMany.mockReset();
   mockLink.deleteMany.mockReset();
   mockLink.create.mockReset();
@@ -99,6 +105,7 @@ beforeEach(() => {
     }
     return arg({
       note: mockNote,
+      directory: mockDirectory,
       link: mockLink,
       tag: mockTag,
       revision: mockRevision,
@@ -111,6 +118,7 @@ beforeEach(() => {
   mockLink.findMany.mockResolvedValue([]);
   // Default: link.updateMany returns count 0
   mockLink.updateMany.mockResolvedValue({ count: 0 });
+  mockDirectory.findFirst.mockResolvedValue(null);
 });
 
 
@@ -316,6 +324,19 @@ describe('NoteService.listNotes', () => {
     expect(findCall.skip).toBe(1);
   });
 
+  test('sorts pinned notes first, then by most recently updated', async () => {
+    mockNote.findMany.mockResolvedValue([]);
+
+    await NoteService.listNotes(userId);
+
+    const findCall = mockNote.findMany.mock.calls[0][0];
+    expect(findCall.orderBy).toEqual([
+      { pinned: 'desc' },
+      { updatedAt: 'desc' },
+      { id: 'asc' },
+    ]);
+  });
+
   test('uses DEFAULT_PAGE_LIMIT when no limit provided', async () => {
     mockNote.findMany.mockResolvedValue([]);
 
@@ -324,6 +345,24 @@ describe('NoteService.listNotes', () => {
     const findCall = mockNote.findMany.mock.calls[0][0];
     // DEFAULT_PAGE_LIMIT is 20, so take should be 21
     expect(findCall.take).toBe(21);
+  });
+
+  test('filters by directoryId', async () => {
+    mockNote.findMany.mockResolvedValue([]);
+
+    await NoteService.listNotes(userId, { directoryId: 'dir_1' });
+
+    const findCall = mockNote.findMany.mock.calls[0][0];
+    expect(findCall.where.directoryId).toBe('dir_1');
+  });
+
+  test('filters unfiled notes', async () => {
+    mockNote.findMany.mockResolvedValue([]);
+
+    await NoteService.listNotes(userId, { unfiled: true });
+
+    const findCall = mockNote.findMany.mock.calls[0][0];
+    expect(findCall.where.directoryId).toBeNull();
   });
 });
 
@@ -341,7 +380,7 @@ describe('NoteService.getNote', () => {
     expect(result).toEqual(baseNote);
     expect(mockNote.findFirst).toHaveBeenCalledWith({
       where: { slug: 'my-note', userId },
-      include: { tags: true },
+      include: { tags: true, directory: { select: { id: true, name: true, parentId: true } } },
     });
   });
 
@@ -468,6 +507,37 @@ describe('NoteService.updateNote', () => {
 
     // createMany called for the wikilink (batch creation replaces per-link create)
     expect(mockLink.createMany).toHaveBeenCalled();
+  });
+
+  test('moves note into a directory', async () => {
+    mockDirectory.findFirst.mockResolvedValue({ id: 'dir_1', userId });
+    mockNote.update.mockResolvedValue({
+      ...baseNote,
+      directoryId: 'dir_1',
+      directory: { id: 'dir_1', name: 'Projects' },
+    });
+
+    await NoteService.updateNote(userId, 'my-note', { directoryId: 'dir_1' });
+
+    const updateArg = mockNote.update.mock.calls[0][0];
+    expect(updateArg.data.directoryId).toBe('dir_1');
+  });
+
+  test('moves note back to unfiled', async () => {
+    mockNote.findFirst.mockResolvedValueOnce({ ...baseNote, directoryId: 'dir_1' });
+    mockNote.update.mockResolvedValue({ ...baseNote, directoryId: null, directory: null });
+
+    await NoteService.updateNote(userId, 'my-note', { directoryId: null });
+
+    const updateArg = mockNote.update.mock.calls[0][0];
+    expect(updateArg.data.directoryId).toBeNull();
+  });
+
+  test('rejects assigning a note to another user directory', async () => {
+    mockDirectory.findFirst.mockResolvedValue(null);
+
+    await expect(NoteService.updateNote(userId, 'my-note', { directoryId: 'other_dir' }))
+      .rejects.toMatchObject({ statusCode: 404, message: 'Directory not found' });
   });
 });
 

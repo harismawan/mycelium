@@ -2,7 +2,12 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: mycelium-migrate
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
+    argocd.argoproj.io/sync-wave: "-1"
 spec:
+  ttlSecondsAfterFinished: 600
   backoffLimit: 2
   template:
     metadata:
@@ -14,8 +19,8 @@ spec:
         - name: ghcr-creds
       containers:
         - name: migrate
-          image: ghcr.io/harismawan/mycelium-api:latest
-          imagePullPolicy: Always
+          image: ghcr.io/harismawan/mycelium-api
+          imagePullPolicy: IfNotPresent
           command: ["bunx", "prisma", "migrate", "deploy"]
           workingDir: /app/apps/api
           envFrom:

@@ -2,8 +2,7 @@ import { FileText, Archive, GitBranch, Activity, Pin, Sun, Moon, LogOut, User, S
 import { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import styled from 'styled-components';
-import { useNoteCounts, useTags } from '../../api/hooks.js';
-import { useNotesStore } from '../../stores/notesStore.js';
+import { useNoteCounts, useNotes, useTags } from '../../api/hooks.js';
 import { useUIStore } from '../../stores/uiStore.js';
 import { useAuthStore } from '../../stores/authStore.js';
 import { apiPost } from '../../api/client.js';
@@ -174,7 +173,6 @@ export default function Sidebar() {
   const location = useLocation();
   const navigate = useNavigate();
   const { theme, setTheme } = useTheme();
-  const pinnedSlugs = useNotesStore((s) => s.pinnedSlugs);
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
 
@@ -192,10 +190,12 @@ export default function Sidebar() {
 
   const { data: counts } = useNoteCounts();
   const { data: tagsData } = useTags();
+  const { data: pinnedData } = useNotes({ pinned: true });
 
   const totalNotes = counts?.total ?? 0;
   const archivedCount = counts?.archived ?? 0;
   const tags = tagsData?.tags ?? tagsData ?? [];
+  const pinnedNotes = pinnedData?.notes ?? [];
 
   // Sync activeSection when navigating to graph
   const isGraph = location.pathname === '/graph';
@@ -226,14 +226,14 @@ export default function Sidebar() {
         <NavLabel>Agent Activity</NavLabel>
       </NavItem>
 
-      {pinnedSlugs.length > 0 && (
+      {pinnedNotes.length > 0 && (
         <>
           <SectionHeader>
             <span>Pinned</span>
           </SectionHeader>
-          {pinnedSlugs.map((slug) => (
-            <PinnedItem key={slug} onClick={() => navigate(`/notes/${slug}`)}>
-              <Pin size={12} style={{ flexShrink: 0 }} /> {slug}
+          {pinnedNotes.map((note) => (
+            <PinnedItem key={note.slug} onClick={() => navigate(`/notes/${note.slug}`)}>
+              <Pin size={12} style={{ flexShrink: 0 }} /> {note.title}
             </PinnedItem>
           ))}
         </>

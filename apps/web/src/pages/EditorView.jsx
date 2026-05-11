@@ -121,8 +121,6 @@ export default function EditorView() {
   const { slug } = useParams();
   const navigate = useNavigate();
   const selectNote = useNotesStore((s) => s.selectNote);
-  const togglePin = useNotesStore((s) => s.togglePin);
-  const pinnedSlugs = useNotesStore((s) => s.pinnedSlugs);
   const resetDirty = useEditorStore((s) => s.resetDirty);
   const isDirty = useEditorStore((s) => s.isDirty);
   const content = useEditorStore((s) => s.content);
@@ -140,7 +138,7 @@ export default function EditorView() {
   const { data: noteData, isLoading, error } = useNote(slug);
   const updateNote = useUpdateNote(slug);
 
-  const isPinned = pinnedSlugs.includes(slug ?? '');
+  const isPinned = noteData?.pinned ?? false;
 
   useEffect(() => {
     if (slug) selectNote(slug);
@@ -237,7 +235,7 @@ export default function EditorView() {
           <Code size={15} />
         </ToolbarButton>
         <ToolbarButton
-          onClick={() => slug && togglePin(slug)}
+          onClick={() => slug && updateNote.mutate({ pinned: !isPinned })}
           aria-label={isPinned ? 'Unpin note' : 'Pin note'}
           title={isPinned ? 'Unpin' : 'Pin'}
         >

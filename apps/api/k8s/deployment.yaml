@@ -15,8 +15,8 @@ spec:
         - name: ghcr-creds
       containers:
         - name: mycelium-api
-          image: ghcr.io/harismawan/mycelium-api:latest
-          imagePullPolicy: Always
+          image: ghcr.io/harismawan/mycelium-api
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 3000
           resources:

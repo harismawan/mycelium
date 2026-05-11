@@ -4,3 +4,7 @@ resources:
   - deployment.yaml
   - service.yaml
   - hpa.yaml
+
+images:
+  - name: ghcr.io/harismawan/mycelium-mcp
+    newTag: 0.0.0

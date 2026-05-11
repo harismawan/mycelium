@@ -53,7 +53,7 @@ export const noteRoutes = new Elysia({ prefix: '/api/v1/notes' })
           action: 'note:create',
           targetResourceId: note.id,
           targetResourceSlug: note.slug,
-          details: { title: ctx.body.title },
+          details: { noteTitle: ctx.body.title },
           status: 'success',
         });
       }
@@ -232,7 +232,7 @@ export const noteRoutes = new Elysia({ prefix: '/api/v1/notes' })
   .patch(
     '/:slug',
     async (/** @type {{ params: { slug: string }, body: { title?: string, content?: string, status?: string, tags?: string[], message?: string }, user: { id: string }, authType: string, apiKeyId: string|null, apiKeyName: string|null, set: any }} */ ctx) => {
-      const note = await NoteService.updateNote(ctx.user.id, ctx.params.slug, {
+      const { note, before } = await NoteService.updateNote(ctx.user.id, ctx.params.slug, {
         ...ctx.body,
         authType: ctx.authType,
         apiKeyId: ctx.apiKeyId,
@@ -240,6 +240,24 @@ export const noteRoutes = new Elysia({ prefix: '/api/v1/notes' })
       });
 
       if (ctx.authType === 'apikey') {
+        const changes = {};
+        if (ctx.body.title !== undefined && ctx.body.title !== before.title) {
+          changes.title = { from: before.title, to: note.title };
+        }
+        if (ctx.body.status !== undefined && ctx.body.status !== before.status) {
+          changes.status = { from: before.status, to: note.status };
+        }
+        if (ctx.body.tags !== undefined) {
+          const fromTags = [...before.tags].sort();
+          const toTags = note.tags.map((t) => t.name).sort();
+          if (JSON.stringify(fromTags) !== JSON.stringify(toTags)) {
+            changes.tags = { from: fromTags, to: toTags };
+          }
+        }
+        if (ctx.body.content !== undefined) {
+          changes.content = { charsBefore: before.content.length, charsAfter: note.content.length };
+        }
+
         await ActivityLogService.logAction({
           userId: ctx.user.id,
           apiKeyId: ctx.apiKeyId,
@@ -247,7 +265,7 @@ export const noteRoutes = new Elysia({ prefix: '/api/v1/notes' })
           action: 'note:update',
           targetResourceId: note.id,
           targetResourceSlug: ctx.params.slug,
-          details: { fields: Object.keys(ctx.body) },
+          details: { noteTitle: note.title, changes },
           status: 'success',
         });
       }
@@ -290,7 +308,7 @@ export const noteRoutes = new Elysia({ prefix: '/api/v1/notes' })
   .delete(
     '/:slug',
     async (/** @type {{ params: { slug: string }, user: { id: string }, authType: string, apiKeyId: string|null, apiKeyName: string|null, set: any }} */ ctx) => {
-      await NoteService.archiveNote(ctx.user.id, ctx.params.slug);
+      const archivedNote = await NoteService.archiveNote(ctx.user.id, ctx.params.slug);
 
       if (ctx.authType === 'apikey') {
         await ActivityLogService.logAction({
@@ -298,9 +316,9 @@ export const noteRoutes = new Elysia({ prefix: '/api/v1/notes' })
           apiKeyId: ctx.apiKeyId,
           apiKeyName: ctx.apiKeyName,
           action: 'note:archive',
-          targetResourceId: null,
+          targetResourceId: archivedNote.id,
           targetResourceSlug: ctx.params.slug,
-          details: {},
+          details: { noteTitle: archivedNote.title },
           status: 'success',
         });
       }
@@ -329,7 +347,7 @@ export const noteRoutes = new Elysia({ prefix: '/api/v1/notes' })
   .delete(
     '/:slug/permanent',
     async (/** @type {{ params: { slug: string }, user: { id: string }, authType: string, apiKeyId: string|null, apiKeyName: string|null, set: any }} */ ctx) => {
-      await NoteService.deleteNote(ctx.user.id, ctx.params.slug);
+      const deletedNote = await NoteService.deleteNote(ctx.user.id, ctx.params.slug);
 
       if (ctx.authType === 'apikey') {
         await ActivityLogService.logAction({
@@ -339,7 +357,7 @@ export const noteRoutes = new Elysia({ prefix: '/api/v1/notes' })
           action: 'note:delete',
           targetResourceId: null,
           targetResourceSlug: ctx.params.slug,
-          details: {},
+          details: { noteTitle: deletedNote.title },
           status: 'success',
         });
       }
@@ -387,7 +405,7 @@ export const noteRoutes = new Elysia({ prefix: '/api/v1/notes' })
           action: 'note:revert',
           targetResourceId: note.id,
           targetResourceSlug: ctx.params.slug,
-          details: { revisionId: ctx.body.revisionId },
+          details: { noteTitle: note.title, revisionId: ctx.body.revisionId },
           status: 'success',
         });
       }

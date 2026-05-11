@@ -478,14 +478,14 @@ describe('NoteService.updateNote', () => {
 describe('NoteService.archiveNote', () => {
   /** Validates: Requirements 5.7 */
   test('sets status to ARCHIVED (soft delete)', async () => {
-    mockNote.findFirst.mockResolvedValue({ id: 'note_1' });
+    mockNote.findFirst.mockResolvedValue({ id: 'note_1', title: 'My Note' });
     mockNote.update.mockResolvedValue({});
 
     await NoteService.archiveNote(userId, 'my-note');
 
     expect(mockNote.findFirst).toHaveBeenCalledWith({
       where: { slug: 'my-note', userId },
-      select: { id: true },
+      select: { id: true, title: true },
     });
     expect(mockNote.update).toHaveBeenCalledWith({
       where: { id: 'note_1' },
@@ -503,6 +503,23 @@ describe('NoteService.archiveNote', () => {
       expect(err.statusCode).toBe(404);
       expect(err.message).toBe('Note not found');
     }
+  });
+
+  test('returns the archived note title', async () => {
+    mockNote.findFirst.mockResolvedValue({ id: 'note_1', title: 'My Note' });
+    mockNote.update.mockResolvedValue({ id: 'note_1', title: 'My Note', status: 'ARCHIVED' });
+
+    const result = await NoteService.archiveNote('user_1', 'my-note');
+
+    expect(result).toEqual({ id: 'note_1', title: 'My Note' });
+  });
+
+  test('throws 404 when note not found', async () => {
+    mockNote.findFirst.mockResolvedValue(null);
+
+    await expect(NoteService.archiveNote('user_1', 'ghost')).rejects.toMatchObject({
+      statusCode: 404,
+    });
   });
 });
 
@@ -540,7 +557,7 @@ describe('NoteService.deleteNote', () => {
 
     expect(mockNote.findFirst).toHaveBeenCalledWith({
       where: { slug: 'my-note', userId },
-      select: { id: true },
+      select: { id: true, title: true },
     });
     // Links from this note deleted
     expect(mockLink.deleteMany).toHaveBeenCalledWith({ where: { fromId: 'note_1' } });
@@ -622,5 +639,67 @@ describe('NoteService.revertNote', () => {
       expect(err.statusCode).toBe(404);
       expect(err.message).toBe('Revision not found');
     }
+  });
+});
+
+describe('NoteService.deleteNote', () => {
+  test('returns the deleted note title', async () => {
+    mockNote.findFirst.mockResolvedValue({ id: 'note_1', title: 'My Note' });
+    // deleteMany and delete are called via $transaction array
+    mockLink.deleteMany.mockResolvedValue({ count: 0 });
+
+    const result = await NoteService.deleteNote('user_1', 'my-note');
+
+    expect(result).toEqual({ title: 'My Note' });
+  });
+
+  test('throws 404 when note not found', async () => {
+    mockNote.findFirst.mockResolvedValue(null);
+
+    await expect(NoteService.deleteNote('user_1', 'ghost')).rejects.toMatchObject({
+      statusCode: 404,
+    });
+  });
+});
+
+describe('NoteService.updateNote — returns before snapshot', () => {
+  test('returns { note, before } with pre-update field values', async () => {
+    const existing = {
+      id: 'note_1',
+      slug: 'my-note',
+      title: 'Old Title',
+      content: 'Old content here',
+      status: 'DRAFT',
+      tags: [{ id: 'tag_1', name: 'old-tag' }],
+    };
+    mockNote.findFirst.mockResolvedValue(existing);
+    mockNote.findMany.mockResolvedValue([]); // no slug collisions
+    mockLink.findMany.mockResolvedValue([]);
+    mockLink.updateMany.mockResolvedValue({ count: 0 });
+
+    const updatedNote = {
+      id: 'note_1',
+      slug: 'new-title',
+      title: 'New Title',
+      content: 'New content here',
+      status: 'PUBLISHED',
+      tags: [{ id: 'tag_2', name: 'new-tag' }],
+      revisions: [],
+    };
+    mockNote.update.mockResolvedValue(updatedNote);
+
+    const result = await NoteService.updateNote('user_1', 'my-note', {
+      title: 'New Title',
+      content: 'New content here',
+      status: 'PUBLISHED',
+      tags: ['new-tag'],
+    });
+
+    expect(result).toHaveProperty('note');
+    expect(result).toHaveProperty('before');
+    expect(result.before.title).toBe('Old Title');
+    expect(result.before.status).toBe('DRAFT');
+    expect(result.before.tags).toEqual(['old-tag']);
+    expect(result.before.content).toBe('Old content here');
   });
 });

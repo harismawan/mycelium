@@ -228,7 +228,7 @@ describe('Smoke: Note CRUD flow (create → read → update → archive)', () =>
     mockNote.update.mockResolvedValue(updatedNote);
     mockNote.findMany.mockResolvedValue([]); // no slug collisions
 
-    const note = await NoteService.updateNote(userId, 'smoke-note', {
+    const { note } = await NoteService.updateNote(userId, 'smoke-note', {
       title: 'Updated Smoke Note',
       content: '---\ntags: [smoke]\n---\nUpdated body',
     });

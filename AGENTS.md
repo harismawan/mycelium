@@ -1,560 +1,183 @@
-# Mycelium Agent API
+# Agent Coding Guidelines
 
-Mycelium exposes a set of machine-friendly REST endpoints designed for AI agent consumption. These endpoints live under `/api/v1/agent` and provide discovery, bulk export, and simplified note listing for programmatic access to the knowledge base.
+Rules for AI agents writing code in this repo. Optimize for: minimal diffs, no breaking changes, tests pass, conventions intact.
 
-## Authentication
-
-All agent endpoints require an API key passed as a Bearer token in the `Authorization` header.
-
-```
-Authorization: Bearer <api_key>
-```
-
-API keys are scoped. Agent endpoints require the `agent:read` scope. Keys are created by authenticated human users through the `POST /api/v1/api-keys` endpoint and can be revoked at any time.
-
-### Required Scopes
-
-| Scope | Description |
-|---|---|
-| `agent:read` | Access agent-specific endpoints (manifest, bundle, notes) |
-
-### Demo API Key
-
-A demo key is created by the seed script for local development and testing:
-
-```
-myc_demo_agent_key_for_testing
-```
-
-This key has `notes:read` and `agent:read` scopes.
-
-## Endpoints
-
-### GET /api/v1/agent/manifest
-
-Returns a JSON manifest describing the agent API — available endpoints, content schema, and authentication requirements. Use this as a discovery endpoint to understand what the API offers before making further requests.
-
-#### Response Schema
-
-```json
-{
-  "apiVersion": "v1",
-  "endpoints": [
-    {
-      "path": "/api/v1/agent/manifest",
-      "method": "GET",
-      "description": "Returns this manifest describing the agent API."
-    },
-    {
-      "path": "/api/v1/agent/bundle",
-      "method": "GET",
-      "description": "Streams all PUBLISHED notes as newline-delimited JSON (NDJSON).",
-      "contentType": "application/x-ndjson"
-    },
-    {
-      "path": "/api/v1/agent/notes",
-      "method": "GET",
-      "description": "Returns a simplified paginated list of notes for agent consumption.",
-      "contentType": "application/json"
-    }
-  ],
-  "contentSchema": {
-    "note": {
-      "id": "string",
-      "slug": "string",
-      "title": "string",
-      "excerpt": "string | null",
-      "tags": "string[]",
-      "updatedAt": "ISO 8601 datetime"
-    }
-  },
-  "auth": {
-    "type": "Bearer",
-    "header": "Authorization",
-    "description": "Requires a valid API key with the \"agent:read\" scope passed as a Bearer token.",
-    "requiredScopes": ["agent:read"]
-  }
-}
-```
-
-#### Example
-
-```bash
-curl -s http://localhost:3000/api/v1/agent/manifest \
-  -H "Authorization: Bearer myc_demo_agent_key_for_testing"
-```
+For runtime API docs (REST + MCP tools), see [README.md](./README.md).
 
 ---
 
-### GET /api/v1/agent/bundle
+## 1. Project Shape
 
-Streams all PUBLISHED notes as newline-delimited JSON (NDJSON). Each line is a self-contained JSON object representing a single note. This allows agents to process notes incrementally without buffering the entire knowledge base in memory.
-
-Notes are ordered by creation date (ascending) and streamed in batches.
-
-#### Response
-
-- Content-Type: `application/x-ndjson`
-- Each line is a valid JSON object terminated by `\n`
-
-#### Response Schema (per line)
-
-```json
-{
-  "id": "string",
-  "slug": "string",
-  "title": "string",
-  "content": "string (pure Markdown body, no frontmatter)",
-  "excerpt": "string | null",
-  "frontmatter": "object | null",
-  "tags": ["string"],
-  "updatedAt": "ISO 8601 datetime"
-}
-```
-
-#### Example
-
-```bash
-curl -s http://localhost:3000/api/v1/agent/bundle \
-  -H "Authorization: Bearer myc_demo_agent_key_for_testing"
-```
-
-Sample output (each line is a separate JSON object):
+Bun workspace monorepo:
 
 ```
-{"id":"clx...","slug":"getting-started-with-mycelium","title":"Getting Started with Mycelium","content":"# Getting Started with Mycelium\n\nWelcome to Mycelium...","excerpt":"Welcome to Mycelium...","frontmatter":null,"tags":["guide","onboarding"],"updatedAt":"2026-04-27T00:00:00.000Z"}
-{"id":"clx...","slug":"how-wikilinks-work","title":"How Wikilinks Work","content":"# How Wikilinks Work\n\nWikilinks let you connect...","excerpt":"Wikilinks let you connect...","frontmatter":null,"tags":["guide","linking"],"updatedAt":"2026-04-27T00:00:00.000Z"}
+apps/
+  api/       Elysia REST server, Prisma, dual auth (JWT cookies + API keys)
+  web/       React 19 + Vite SPA, BlockNote editor, Zustand + TanStack Query
+  mcp/       MCP server (stdio + HTTP), reuses api services
+packages/
+  shared/    Markdown pipeline, slug helpers, Redis client, constants
 ```
+
+- Runtime: **Bun** (not Node). Use `bun` / `bunx`, not `npm` / `npx`.
+- Module system: ESM (`"type": "module"`). All imports use ESM syntax with `.js` extension.
+- No TypeScript build step. Plain `.js` / `.jsx` files. Type-like guarantees come from Zod/Elysia `t.*` schemas and Prisma.
 
 ---
 
-### GET /api/v1/agent/notes
+## 2. Workflow Before You Code
 
-Returns a simplified paginated list of PUBLISHED notes optimized for agent consumption. Only includes fields useful for agents: id, slug, title, excerpt, tags, and updatedAt. Uses cursor-based pagination.
-
-#### Query Parameters
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `cursor` | string | — | ID of the last item from the previous page. Omit for the first page. |
-| `limit` | string (integer) | `20` | Number of notes to return per page (max determined by server). |
-
-#### Response Schema
-
-```json
-{
-  "notes": [
-    {
-      "id": "string",
-      "slug": "string",
-      "title": "string",
-      "excerpt": "string | null",
-      "tags": ["string"],
-      "updatedAt": "ISO 8601 datetime"
-    }
-  ],
-  "nextCursor": "string | null"
-}
-```
-
-When `nextCursor` is `null`, there are no more pages.
-
-#### Example
-
-Fetch the first page:
-
-```bash
-curl -s http://localhost:3000/api/v1/agent/notes \
-  -H "Authorization: Bearer myc_demo_agent_key_for_testing"
-```
-
-Fetch the next page using the cursor from the previous response:
-
-```bash
-curl -s "http://localhost:3000/api/v1/agent/notes?cursor=clx...&limit=10" \
-  -H "Authorization: Bearer myc_demo_agent_key_for_testing"
-```
-
-## Error Responses
-
-All agent endpoints return standard error responses:
-
-| Status | Meaning |
-|---|---|
-| `401 Unauthorized` | Missing, invalid, or revoked API key |
-| `403 Forbidden` | API key lacks the required `agent:read` scope |
-| `500 Internal Server Error` | Unexpected server error |
+1. **Read first.** Find the closest existing pattern (sibling route/service/component) and mirror it. Do not invent new patterns.
+2. **Locate the seam.** Most features touch: route schema → service → Prisma. Trace this path before editing.
+3. **Run tests for the touched workspace** before changes to know baseline.
+4. **Smallest diff that works.** No drive-by refactors. No reformatting unrelated lines.
 
 ---
 
-# Mycelium MCP Server
+## 3. Backend (apps/api)
 
-In addition to the REST agent API, Mycelium ships an [MCP](https://modelcontextprotocol.io/) server (`apps/mcp/`) that exposes the knowledge base to AI agents (Claude Desktop, Cursor, Kiro, etc.) over JSON-RPC. The MCP server reuses the existing services and API key authentication — no separate credential system.
+### Layering
 
-## Connecting
-
-The server supports two transports:
-
-| Transport | When to use | API key source |
+| Layer | Responsibility | Don't |
 |---|---|---|
-| `stdio` (default) | Local clients (Claude Desktop, Cursor, Kiro) that spawn the server as a subprocess | `MYCELIUM_API_KEY` env var |
-| `http` (Streamable HTTP) | Remote clients or shared deployments | `Authorization: Bearer <key>` header |
+| `routes/*.routes.js` | HTTP shape: schema, auth guard, scope check, call service | Put business logic here |
+| `services/*.service.js` | Business logic, Prisma queries, transactions | Touch `set.status`, cookies, headers |
+| `middleware/` | Auth resolution, rate limit, CSRF, logging | Branch on route paths |
+| `schemas/` | Shared Elysia/Zod schemas | Duplicate per route |
+| `utils/` | Pure helpers | Hide I/O |
 
-### stdio (auto-configuration)
+Routes return plain objects; Elysia serializes. Throw via `error(status, body)` from route handlers — services throw plain `Error` with codes, routes translate.
 
-MCP clients can auto-discover the server using the `apps/mcp/mcp.json` config:
+### Auth & Scopes
 
-```json
-{
-  "mcpServers": {
-    "mycelium": {
-      "command": "bun",
-      "args": ["run", "apps/mcp/src/index.js"],
-      "env": {
-        "MYCELIUM_API_KEY": "",
-        "DATABASE_URL": ""
-      }
-    }
-  }
-}
-```
+- Two auth types: `jwt` (human cookie) and `apikey` (agent bearer). Resolved in `middleware/auth.js`, attached as `ctx.user`, `ctx.authType`, `ctx.scopes`.
+- Agent endpoints require explicit scope check (`agent:read`, `notes:write`). Never trust route path for authorization.
+- Every agent mutation must call `activity-log.service` with `{ action, apiKeyName, status }`.
 
-Copy the entry into your client's MCP config, fill in `MYCELIUM_API_KEY` and `DATABASE_URL`, and restart the client.
+### Database
 
-Equivalent manual command:
+- Prisma client is a singleton from `apps/api/src/db.js`. Don't `new PrismaClient()` elsewhere.
+- Schema lives in `apps/api/prisma/schema.prisma`. Migrations only via `bunx --cwd apps/api prisma migrate dev --name <slug>`. Never hand-edit migrations.
+- Use transactions (`prisma.$transaction`) for multi-table writes that must be atomic (note + tags + links + revision).
+- Use `select`/`include` explicitly. No `findMany` without projection on large tables.
+- Slug generation: `packages/shared/slug.js`. Always go through it — collisions are handled there.
 
-```bash
-MYCELIUM_API_KEY=myc_... DATABASE_URL=postgres://... bun run apps/mcp/src/index.js
-```
+### Markdown & Links
 
-### Streamable HTTP
+- Markdown parsing/serialization is in `packages/shared/markdown.js`. Don't reimplement.
+- Wikilinks (`[[Note Title]]`) are extracted by the markdown pipeline and persisted as `Link` rows by `link.service.js`. Any note write that changes content **must** re-run link extraction.
 
-```bash
-MCP_TRANSPORT=http MCP_PORT=3001 DATABASE_URL=postgres://... bun run apps/mcp/src/index.js
-```
+### Rate Limiting & Sessions
 
-Clients POST JSON-RPC to `http://<host>:3001/mcp` with `Authorization: Bearer <key>`.
-
-## Environment Variables
-
-| Variable | Required | Default | Description |
-|---|---|---|---|
-| `DATABASE_URL` | yes | — | PostgreSQL connection string |
-| `MYCELIUM_API_KEY` | stdio only | — | API key for stdio transport |
-| `MCP_TRANSPORT` | no | `stdio` | `stdio` or `http` |
-| `MCP_PORT` | http only | `3001` | HTTP listen port |
-
-## Authentication and Scopes
-
-Every tool invocation is authenticated against the existing `ApiKey` table and authorized by scope.
-
-| Scope | Grants |
-|---|---|
-| `agent:read` | All read tools (search, read, list, graph, links, tags) |
-| `notes:write` | `create_note`, `update_note` |
-
-Missing or invalid keys cause the server to refuse tool execution. Insufficient scopes return a JSON-RPC error.
-
-## Tools
-
-All tools accept a JSON object as input and return MCP `text` content containing JSON. Validation errors return JSON-RPC code `-32602`. Not-found errors are returned as tool-level errors with `isError: true`.
-
-### `search_notes` — full-text search
-
-Required scopes: `agent:read`
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `query` | string (min 1) | yes | Full-text search query |
-| `tag` | string | no | Filter by tag name |
-| `status` | `DRAFT` \| `PUBLISHED` \| `ARCHIVED` | no | Filter by status |
-| `limit` | integer (1–100) | no | Max results (default 20) |
-
-Returns: array of `{ id, slug, title, excerpt, status, rank }`.
-
-### `read_note` — fetch a note by slug
-
-Required scopes: `agent:read`
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `slug` | string (min 1) | yes | Note slug |
-| `format` | `json` \| `markdown` | no | Response format (default `json`) |
-
-Returns (`json`): `{ id, slug, title, content, excerpt, status, tags, updatedAt }`.
-Returns (`markdown`): raw Markdown string with YAML frontmatter.
-
-### `list_notes` — paginated list with filters
-
-Required scopes: `agent:read`
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `status` | `DRAFT` \| `PUBLISHED` \| `ARCHIVED` | no | Filter by status |
-| `tag` | string | no | Filter by tag name |
-| `query` | string | no | Title/content substring search |
-| `cursor` | string | no | Pagination cursor |
-| `limit` | integer (1–100) | no | Page size (default 20) |
-
-Returns: `{ notes: [{ id, slug, title, excerpt, status, tags, updatedAt }], nextCursor }`.
-
-### `list_tags` — all tags with note counts
-
-Required scopes: `agent:read`. No parameters.
-
-Returns: `{ tags: [{ name, noteCount }] }`, sorted alphabetically by name.
-
-### `get_backlinks` — notes that link to a target
-
-Required scopes: `agent:read`
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `slug` | string (min 1) | yes | Target note slug |
-
-Returns: array of `{ id, slug, title, tags }`.
-
-### `get_outgoing_links` — wikilinks from a note
-
-Required scopes: `agent:read`
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `slug` | string (min 1) | yes | Source note slug |
-
-Returns: `{ resolved: [{ id, slug, title }], unresolved: [{ title }] }`.
-
-### `get_graph` — knowledge graph or ego-subgraph
-
-Required scopes: `agent:read`
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `slug` | string | no | Center note for ego-subgraph (omit for full graph) |
-| `depth` | integer (1–5) | no | BFS depth from center note (default 1) |
-
-Returns: `{ nodes: [{ id, slug, title, status }], edges: [{ fromId, toId, relation }] }`.
-
-### `create_note` — create a new note
-
-Required scopes: `notes:write`
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `title` | string (min 1) | yes | Note title |
-| `content` | string | yes | Markdown body |
-| `status` | `DRAFT` \| `PUBLISHED` \| `ARCHIVED` | no | Status (default `DRAFT`) |
-| `tags` | string[] | no | Tag names |
-
-Returns: `{ id, slug, title, status, tags }`.
-
-### `update_note` — update an existing note
-
-Required scopes: `notes:write`
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `slug` | string (min 1) | yes | Note slug to update |
-| `title` | string | no | New title |
-| `content` | string | no | New Markdown body |
-| `status` | `DRAFT` \| `PUBLISHED` \| `ARCHIVED` | no | New status |
-| `tags` | string[] | no | Replacement tag set |
-| `message` | string | no | Revision message |
-
-Returns: `{ id, slug, title, status, tags }`.
-
-## Error Codes
-
-| Code | Meaning |
-|---|---|
-| `-32700` | Malformed JSON-RPC |
-| `-32601` | Unknown JSON-RPC method |
-| `-32602` | Validation error (invalid params) |
-| `-32603` | Auth, scope, or database error |
-
-Database errors set `isRetryable: true` in the error payload. Tool-level errors (e.g. note not found) return `isError: true` MCP content with a descriptive payload.
+- Redis-backed. Client from `packages/shared/redis.js`.
+- Session/JWT state in `session.service.js`. Token revocation is jti-based — don't bypass.
 
 ---
 
-# OpenClaw Integration
+## 4. Frontend (apps/web)
 
-Mycelium works as a persistent knowledge store for [OpenClaw](https://openclaw.dev) agents. Install it as a skill and your agent gets full read-write access to the knowledge base — search, create, link, and recall notes across sessions.
+- React 19, function components, hooks only. No class components.
+- State split:
+  - **Server state** → TanStack Query (`hooks/use*.js`). Always with a stable `queryKey`.
+  - **Client/UI state** → Zustand stores in `stores/`. One store per concern.
+  - **Local-only** → `useState`.
+- Styling: `styled-components`. Use existing theme tokens from `styles/theme.css` / styled-components ThemeProvider. No inline style objects except dynamic positions.
+- API calls go through `api/` modules — never `fetch` from a component.
+- Editor: BlockNote. The serialization round-trip (blocks ↔ markdown) is fragile; route changes through existing helpers, do not bypass.
 
-## Installation
+---
 
-### Via ClawHub
+## 5. MCP (apps/mcp)
 
-```bash
-claw install mycelium-knowledge-base
-```
+- Tools defined under `apps/mcp/src/tools/`. Each tool: input schema (zod), scope check, call the same `services/*` from the API workspace.
+- Never duplicate business logic between MCP and REST. If you need shared behavior, lift it to a service.
+- Tool errors: validation → JSON-RPC `-32602`; auth/db → `-32603`; tool-level "not found" → MCP content with `isError: true`.
 
-### Manual
+---
 
-Copy the `apps/mcp/skill.json` manifest into your OpenClaw skills directory, or add the MCP entry directly to your agent config:
+## 6. Testing
 
-```json
-{
-  "mcpServers": {
-    "mycelium": {
-      "command": "bun",
-      "args": ["run", "apps/mcp/src/index.js"],
-      "env": {
-        "MYCELIUM_API_KEY": "<your_api_key>",
-        "DATABASE_URL": "<your_postgres_connection_string>"
-      }
-    }
-  }
-}
-```
+- Test runner: `bun test --isolate` (root `bun test` script already passes `--isolate`). **Always use `--isolate`** — shared module state leaks across files otherwise.
+- Tests colocated in `apps/<workspace>/test/`. Mirror the source tree.
+- Each test file is responsible for its own mock setup; do not rely on a global setup file.
+- For DB-touching tests: use the smoke/integration harness under `apps/api/test/` rather than mocking Prisma deeply.
+- Run only the workspace you changed:
+  ```bash
+  bun test --isolate --cwd apps/api
+  bun test --isolate --cwd apps/mcp
+  bun test --isolate --cwd packages/shared
+  ```
 
-## Configuration
+---
 
-Two environment variables are required:
+## 7. Conventions
 
-| Variable | Required | Description |
-|---|---|---|
-| `MYCELIUM_API_KEY` | yes | API key with `agent:read` and `notes:write` scopes |
-| `DATABASE_URL` | yes | PostgreSQL connection string (e.g. `postgres://user:pass@localhost:5432/mycelium`) |
+### Code style
 
-Create an API key through the Mycelium web UI or via the REST API:
+- No semicolons elision games; match the surrounding file.
+- `async`/`await`, no raw `.then` chains in new code.
+- Errors: throw `Error` with a message; attach `.code` for programmatic handling. Never return error sentinels.
+- Logging: `utils/logger.js` (pino). No `console.log` in committed code (tests exempted).
+- No comments restating code. Only comment non-obvious *why*.
 
-```bash
-curl -s -X POST http://localhost:3000/api/v1/api-keys \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <user_token>" \
-  -d '{"name": "openclaw-agent", "scopes": ["agent:read", "notes:write"]}'
-```
+### Naming
 
-## Verify Connection
+- Files: kebab-case (`note.service.js`, `auth.routes.js`).
+- Exports: camelCase for functions, PascalCase for components/classes.
+- Route paths: lowercase, plural resources (`/api/v1/notes`, `/api/v1/api-keys`).
 
-After configuring the skill, verify the MCP server connects and tools are available:
+### Imports
 
-```bash
-# Start the server manually to test
-MYCELIUM_API_KEY=myc_... DATABASE_URL=postgres://... bun run apps/mcp/src/index.js
-```
+- Workspace imports use package names (`@mycelium/shared`), not relative paths across workspaces.
+- Order: stdlib → external → workspace → local. Single blank line between groups.
 
-From your OpenClaw agent, invoke `list_notes` with an empty filter. A successful response confirms authentication, database connectivity, and tool registration:
+---
 
-```json
-{ "notes": [], "nextCursor": null }
-```
+## 8. Schema & Data Changes
 
-If the API key is missing or invalid, the server returns a JSON-RPC error with code `-32603`. If the database is unreachable, the server exits with a non-zero exit code at startup.
+A schema change is never "just a migration":
 
-## Convenience Tools
+1. `prisma/schema.prisma` updated.
+2. `bunx --cwd apps/api prisma migrate dev --name <slug>` to generate migration.
+3. Update service queries (`select`/`include`/types).
+4. Update Elysia route schemas if exposed.
+5. Update seed (`apps/api/prisma/seed.js`) if a new required column lacks default.
+6. Update tests.
 
-These tools are optimized for OpenClaw's read-write memory loop: load context at session start, do work, file findings at session end.
+If any step is skipped, the change is incomplete.
 
-### `get_context` — load relevant notes
+---
 
-Fetches the most relevant notes for a topic via full-text search, or the most recently updated notes if no topic is provided. Designed for session-start context loading.
+## 9. Security Non-Negotiables
 
-Required scopes: `agent:read`
+- API keys: stored as SHA-256 hash + prefix. Never log the raw key. Never return it after creation response.
+- JWTs: signed with `JWT_SECRET`. Access tokens short-lived; refresh tokens rotate. Do not extend lifetimes without an explicit ask.
+- CSRF: state-changing JWT-auth routes require the CSRF middleware. API-key routes don't (different auth surface).
+- Input: every route has an Elysia `body`/`query` schema. No route accepts unvalidated input.
+- SQL: only via Prisma. No `$queryRawUnsafe` with interpolation.
+- Secrets: never hardcode. Read from `process.env`. Update `.env.example` (not `.env`) when adding a var.
 
-| Parameter | Type | Required | Default | Description |
-|---|---|---|---|---|
-| `topic` | string | no | — | Topic to search for. If omitted, returns most recently updated notes. |
-| `limit` | integer (1–20) | no | `10` | Maximum number of notes to return |
+---
 
-Returns: array of note objects.
+## 10. What To Avoid
 
-```json
-[
-  {
-    "id": "clx...",
-    "slug": "project-alpha-notes",
-    "title": "Project Alpha Notes",
-    "excerpt": "Summary of findings...",
-    "tags": ["research", "agent-memory"],
-    "updatedAt": "2026-04-27T12:00:00.000Z"
-  }
-]
-```
+- Adding dependencies for trivial helpers — check `packages/shared` first.
+- New abstractions on first use. Inline twice, abstract on the third.
+- Renaming existing files/symbols as a side effect of a feature.
+- Generated files (`prisma/migrations/*` SQL, lockfiles) — never hand-edit.
+- Touching `bun.lock` directly. Run `bun install` instead.
+- Catching errors only to re-throw or log-and-swallow.
+- Backwards-compat shims for code you control — just update the callers.
 
-Example usage pattern:
+---
 
-```
-1. Session start → get_context({ topic: "project alpha" })
-2. Agent reads returned notes for background context
-3. Agent proceeds with its task using the loaded context
-```
+## 11. Definition of Done
 
-### `save_memory` — file a finding as a note
+Before declaring a task done:
 
-Creates a published note auto-tagged with `agent-memory`. Designed for session-end memory filing.
-
-Required scopes: `notes:write`
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `title` | string (min 1) | yes | Note title |
-| `content` | string | yes | Markdown body |
-| `tags` | string[] | no | Additional tags (merged with `agent-memory`) |
-
-The `agent-memory` tag is always included regardless of the `tags` parameter. The note is created with status `PUBLISHED`.
-
-Returns: the created note's id and slug.
-
-```json
-{
-  "id": "clx...",
-  "slug": "research-findings-2026-04-27"
-}
-```
-
-## Session Context Tools
-
-Ephemeral key-value storage scoped to the current MCP connection. Use this for working memory that doesn't need to persist in the knowledge base — scratchpad values, intermediate results, agent state.
-
-Session data is discarded when the MCP connection closes. It is never written to the database.
-
-Required scopes: `agent:read`
-
-### `set_session_context` — store a key-value pair
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `key` | string (min 1) | yes | Storage key |
-| `value` | string | yes | Value to store |
-
-Limits: maximum 100 keys per session, maximum 10KB per value. Exceeding either limit returns a validation error.
-
-Returns:
-
-```json
-{ "success": true }
-```
-
-### `get_session_context` — retrieve a value by key
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `key` | string (min 1) | yes | Storage key to look up |
-
-Returns the stored value, or `null` if the key does not exist:
-
-```json
-{ "value": "stored string value" }
-```
-
-```json
-{ "value": null }
-```
-
-### `list_session_context` — list all session key-value pairs
-
-No parameters.
-
-Returns all entries in the current session store:
-
-```json
-{
-  "entries": [
-    { "key": "current_task", "value": "investigate auth bug" },
-    { "key": "findings_count", "value": "3" }
-  ]
-}
-```
-
-> **Note:** Session context is ephemeral. All data is discarded when the MCP connection closes. For persistent storage, use `save_memory` or `create_note` instead.
+- [ ] Tests for the touched workspace pass (`bun test --isolate --cwd <workspace>`)
+- [ ] No new lint/format drift in unrelated files
+- [ ] Migration generated (if schema changed) and seed still runs
+- [ ] `.env.example` updated (if new env var)
+- [ ] README/this file updated (only if user-facing behavior or guideline changed)
+- [ ] Manual smoke check on the golden path if UI changed — type checks and unit tests do not verify feature correctness

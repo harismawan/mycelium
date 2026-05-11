@@ -300,11 +300,15 @@ function formatTimestamp(dateStr) {
 function summarizeDetails(details) {
   if (!details || typeof details !== 'object') return null;
   const parts = [];
-  if (details.title) parts.push(`"${details.title}"`);
+  if (details.noteTitle) parts.push(`"${details.noteTitle}"`);
+  else if (details.title) parts.push(`"${details.title}"`);
   if (details.message) parts.push(details.message);
   if (details.error) parts.push(`Error: ${details.error}`);
   if (details.query) parts.push(`Query: "${details.query}"`);
   if (details.revisionId) parts.push(`Revision: ${details.revisionId}`);
+  if (details.changes && Object.keys(details.changes).length > 0) {
+    parts.push(`Changed: ${Object.keys(details.changes).join(', ')}`);
+  }
   return parts.length > 0 ? parts.join(' · ') : null;
 }
 
@@ -445,7 +449,7 @@ export default function ActivityFeedPage() {
 
                 {entry.targetResourceSlug && (
                   <ResourceLink to={`/notes/${entry.targetResourceSlug}`}>
-                    {entry.targetResourceSlug}
+                    {entry.details?.noteTitle || entry.targetResourceSlug}
                   </ResourceLink>
                 )}
                 {!entry.targetResourceSlug && entry.targetResourceId && (

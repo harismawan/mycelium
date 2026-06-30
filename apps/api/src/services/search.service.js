@@ -157,11 +157,12 @@ export const SearchService = {
    * When `expand` is true and a topic is given, the lexical seeds are augmented
    * with graph neighbors that the seeds co-cite (`_expandNeighbors`), then the
    * combined set is re-ranked with a min-max-normalized lexical + co-citation
-   * blend. The returned array shape is identical to the flat path either way.
+   * blend. Note: expand=false returns the full agent-facing shape with ranking
+   * metadata, while expand=true returns a minimal shape for context hydration.
    *
    * @param {string} userId
    * @param {{ topic?: string, limit?: number, expand?: boolean, expandDepth?: number }} [opts={}]
-   * @returns {Promise<Array<{ id: string, slug: string, title: string, excerpt: string | null, source: string | null, confidence: number | null, importance: number | null, score: number | null, snippet: string | null, tags: string[], updatedAt: string }>>}
+   * @returns {Promise<Array<{ id: string, slug: string, title: string, excerpt: string | null, tags: string[], updatedAt: string } | { id: string, slug: string, title: string, excerpt: string | null, source: string | null, confidence: number | null, importance: number | null, score: number | null, snippet: string | null, tags: string[], updatedAt: string }>>} — expand=false returns rich shape (with source, confidence, importance, score, snippet); expand=true returns minimal shape (id, slug, title, excerpt, tags, updatedAt only)
    */
   async getContext(userId, opts = {}) {
     const limit = opts.limit ?? DEFAULT_PAGE_LIMIT;

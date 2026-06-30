@@ -19,6 +19,7 @@ import { register as registerRemember } from './tools/remember.js';
 import { register as registerSetSessionContext } from './tools/set-session-context.js';
 import { register as registerGetSessionContext } from './tools/get-session-context.js';
 import { register as registerListSessionContext } from './tools/list-session-context.js';
+import { register as registerPromoteSessionContext } from './tools/promote-session-context.js';
 
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf-8'));
 
@@ -61,6 +62,7 @@ export function createServer(authContext) {
   registerSetSessionContext(server, authContext);
   registerGetSessionContext(server, authContext);
   registerListSessionContext(server, authContext);
+  registerPromoteSessionContext(server, authContext);
 
   return server;
 }

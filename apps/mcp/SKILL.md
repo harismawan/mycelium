@@ -27,7 +27,8 @@ Write tools require `notes:write`:
 - `create_directory`: create root or nested directory with `name`, optional `parentId`.
 - `update_directory`: rename or move directory with `id`, optional `name`, `parentId`; cycles are rejected.
 - `delete_directory`: delete only empty directories.
-- `save_memory`: create a published durable memory note tagged `agent-memory`.
+- `remember`: recall-then-upsert a durable memory tagged `agent-memory`. Matches an existing memory by exact title; `mode` is `append` (default, appends a timestamped section), `replace` (overwrite), or `new` (always create).
+- `save_memory`: thin alias for `remember` with append-on-duplicate (no `mode` parameter). Prefer `remember` when you need `replace` or `new`.
 - `set_session_context`: store ephemeral per-session key/value context.
 
 ## Operating Rules
@@ -78,15 +79,14 @@ Do not delete directories unless they are empty. If `delete_directory` reports `
 
 ## Memory Rule
 
-Always use `save_memory` for agent memories. `save_memory` automatically stores memory notes in the root `memories` directory, creating that directory if missing, and adds the `agent-memory` tag.
+Always use `remember` (or its alias `save_memory`) for agent memories. Both store the note in the root `memories` directory, creating it if missing, add the `agent-memory` tag, and publish.
 
-Use concise memory titles that will search well later:
+To avoid duplicates, both recall an existing memory with the **exact same title** before writing:
+- `mode: "append"` (default) adds a timestamped section to the existing memory.
+- `mode: "replace"` overwrites the existing memory — use only when the old content is wrong.
+- `mode: "new"` always creates a fresh note (use a distinct title to avoid clutter).
 
-- `Project X API Auth Decision`
-- `Mycelium MCP Directory Behavior`
-- `Customer Y Deployment Constraint`
-
-Memory content should include the fact, why it matters, source/context, and date if time-sensitive.
+Reuse a stable title across sessions to let updates consolidate onto one note.
 
 ## Common Workflows
 
@@ -111,8 +111,9 @@ Update a note:
 
 Save durable memory:
 
-1. Search for an existing memory when likely duplicate
-2. `save_memory({ title, content, tags })`
+1. `remember({ title, content })` — append-on-duplicate by default; reuse the same title to consolidate.
+2. Use `remember({ title, content, mode: "replace" })` to correct a memory whose content is now wrong.
+3. `save_memory({ title, content, tags })` remains available as the append-only alias.
 
 ## Templates
 

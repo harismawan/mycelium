@@ -511,3 +511,49 @@ describe('LinkService.getGraph — ego-subgraph', () => {
     expect(relations).toContain('refines');
   });
 });
+
+// ===========================================================================
+// SearchService.getContext — metadata surface + importance ranking
+// ===========================================================================
+describe('SearchService.getContext metadata', () => {
+  test('topic path: surfaces metadata and applies importance-weighted ORDER BY', async () => {
+    mockQueryRaw
+      .mockResolvedValueOnce([
+        {
+          id: 'n1', slug: 'alpha', title: 'Alpha', excerpt: 'ex',
+          source: 'session:1', confidence: 0.9, importance: 4,
+          updatedAt: new Date('2026-01-01T00:00:00Z'),
+        },
+      ])
+      .mockResolvedValueOnce([]); // tag lookup ($queryRaw is called a second time)
+
+    const out = await SearchService.getContext(userId, { topic: 'alpha', limit: 5 });
+
+    expect(out[0]).toMatchObject({
+      id: 'n1', source: 'session:1', confidence: 0.9, importance: 4,
+    });
+
+    // calls[0][0] = raw template strings (real quotes); calls[0].slice(1) = bound values.
+    const call = mockQueryRaw.mock.calls[0];
+    const rawSql = call[0].join('');
+    expect(rawSql).toContain('n."source"');                 // metadata columns selected
+    expect(rawSql).toContain('COALESCE(n."importance", 0)'); // importance-weighted ranking
+    expect(call.slice(1)).toContain(0.15);                  // IMPORTANCE_BOOST bound as a parameter
+  });
+
+  test('no-topic path: surfaces metadata from findMany', async () => {
+    mockNote.findMany.mockResolvedValue([
+      {
+        id: 'n2', slug: 'beta', title: 'Beta', excerpt: null,
+        source: null, confidence: null, importance: 2,
+        tags: [{ name: 'x' }], updatedAt: new Date('2026-01-02T00:00:00Z'),
+      },
+    ]);
+
+    const out = await SearchService.getContext(userId, { limit: 5 });
+
+    expect(out[0]).toMatchObject({
+      id: 'n2', source: null, confidence: null, importance: 2, tags: ['x'],
+    });
+  });
+});

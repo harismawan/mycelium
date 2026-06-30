@@ -6,6 +6,12 @@ import { prisma } from '../db.js';
 // websearch_to_tsquery lexical query returns zero rows.
 const TRIGRAM_SIMILARITY_THRESHOLD = 0.3;
 
+/**
+ * Multiplier applied per `importance` point when ranking topic results.
+ * `importance` is agent-supplied and gameable — keep this weight low and tunable.
+ */
+const IMPORTANCE_BOOST = 0.15;
+
 function encodeCursor(note) {
   const updatedAt =
     note.updatedAt instanceof Date ? note.updatedAt.toISOString() : note.updatedAt ?? null;
@@ -132,7 +138,7 @@ export const SearchService = {
    *
    * @param {string} userId
    * @param {{ topic?: string, limit?: number }} [opts={}]
-   * @returns {Promise<Array<{ id: string, slug: string, title: string, excerpt: string | null, score: number | null, snippet: string | null, tags: string[], updatedAt: string }>>}
+   * @returns {Promise<Array<{ id: string, slug: string, title: string, excerpt: string | null, source: string | null, confidence: number | null, importance: number | null, score: number | null, snippet: string | null, tags: string[], updatedAt: string }>>}
    */
   async getContext(userId, opts = {}) {
     const limit = opts.limit ?? DEFAULT_PAGE_LIMIT;
@@ -150,6 +156,9 @@ export const SearchService = {
         slug: note.slug,
         title: note.title,
         excerpt: note.excerpt,
+        source: note.source,
+        confidence: note.confidence,
+        importance: note.importance,
         score: null,
         snippet: note.excerpt,
         tags: note.tags.map((tag) => tag.name),
@@ -159,7 +168,7 @@ export const SearchService = {
 
     const tsQuery = Prisma.sql`websearch_to_tsquery('english', ${opts.topic})`;
     let results = await prisma.$queryRaw`
-      SELECT n."id", n."slug", n."title", n."excerpt", n."updatedAt",
+      SELECT n."id", n."slug", n."title", n."excerpt", n."source", n."confidence", n."importance", n."updatedAt",
              n."pinned",
              ts_rank(n."searchVector", ${tsQuery}) AS score,
              ts_headline('english', n."content", ${tsQuery},
@@ -168,14 +177,14 @@ export const SearchService = {
       WHERE n."userId" = ${userId}
         AND n."status" != 'ARCHIVED'
         AND n."searchVector" @@ ${tsQuery}
-      ORDER BY n."pinned" DESC, score DESC, n."updatedAt" DESC
+      ORDER BY n."pinned" DESC, ts_rank(n."searchVector", ${tsQuery}) * (1 + COALESCE(n."importance", 0) * ${IMPORTANCE_BOOST}) DESC, n."updatedAt" DESC
       LIMIT ${limit}
     `;
 
     // Lexical miss (typo / paraphrase) → pg_trgm fuzzy fallback on title.
     if (results.length === 0) {
       results = await prisma.$queryRaw`
-        SELECT n."id", n."slug", n."title", n."excerpt", n."updatedAt",
+        SELECT n."id", n."slug", n."title", n."excerpt", n."source", n."confidence", n."importance", n."updatedAt",
                similarity(n."title", ${opts.topic}) AS score,
                n."excerpt" AS snippet
         FROM "Note" n
@@ -209,6 +218,9 @@ export const SearchService = {
       slug: note.slug,
       title: note.title,
       excerpt: note.excerpt,
+      source: note.source,
+      confidence: note.confidence,
+      importance: note.importance,
       score: note.score == null ? null : Number(note.score),
       snippet: note.snippet ?? note.excerpt,
       tags: tagMap.get(note.id) ?? [],

@@ -44,7 +44,9 @@ model Note {
   confidence  Float?
   importance  Int?
   status      NoteStatus @default(DRAFT)
-  pinned      Boolean    @default(false)
+  pinned         Boolean    @default(false)
+  lastAccessedAt DateTime?
+  accessCount    Int        @default(0)
   searchVector Unsupported("tsvector")? @default(dbgenerated())
   embedding    Unsupported("vector(1024)")?
   createdAt   DateTime   @default(now())

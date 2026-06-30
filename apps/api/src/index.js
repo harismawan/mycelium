@@ -17,14 +17,6 @@ import { activityLogRoutes } from './routes/activity-log.routes.js';
 
 const port = process.env.PORT || 3000;
 
-// Connect to Redis before starting the server
-try {
-  await connectRedis();
-} catch (err) {
-  console.error('❌ Failed to connect to Redis:', err.message);
-  process.exit(1);
-}
-
 /**
  * Main Elysia application.
  *
@@ -126,9 +118,21 @@ app
   .use(graphRoutes)
   .use(agentRoutes)
   .use(maintenanceRoutes)
-  .use(activityLogRoutes)
-  .listen(port);
+  .use(activityLogRoutes);
 
-console.log(`🍄 Mycelium API listening on http://localhost:${port}`);
+// Boot the server only when this module is the entrypoint. Importing it
+// (e.g. from tests) must not connect to Redis or bind a port — and keeping
+// the top-level `await` out of the module body ensures `app` is fully
+// initialized for importers (no temporal-dead-zone on the `app` export).
+if (import.meta.main) {
+  try {
+    await connectRedis();
+  } catch (err) {
+    console.error('❌ Failed to connect to Redis:', err.message);
+    process.exit(1);
+  }
+  app.listen(port);
+  console.log(`🍄 Mycelium API listening on http://localhost:${port}`);
+}
 
 export { app };

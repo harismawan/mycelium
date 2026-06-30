@@ -9,7 +9,7 @@ generator client {
 datasource db {
   provider   = "postgresql"
   url        = env("DATABASE_URL")
-  extensions = [pgTrgm(map: "pg_trgm")]
+  extensions = [pgTrgm(map: "pg_trgm"), vector]
 }
 
 enum NoteStatus {
@@ -46,6 +46,7 @@ model Note {
   status      NoteStatus @default(DRAFT)
   pinned      Boolean    @default(false)
   searchVector Unsupported("tsvector")? @default(dbgenerated())
+  embedding    Unsupported("vector(1024)")?
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
   userId      String

@@ -119,3 +119,58 @@ describe('SearchService.getContext score + snippet', () => {
     expect(out[0].updatedAt).toBe('2026-02-02T00:00:00.000Z');
   });
 });
+
+// ===========================================================================
+// getContext — pg_trgm fuzzy fallback
+// ===========================================================================
+describe('SearchService.getContext fuzzy fallback', () => {
+  test('falls back to trigram similarity when websearch returns zero rows', async () => {
+    mockQueryRaw
+      .mockResolvedValueOnce([]) // main websearch: lexical miss
+      .mockResolvedValueOnce([
+        {
+          id: 'n1',
+          slug: 'graff-theory',
+          title: 'Graff theory',
+          excerpt: 'about graphs',
+          updatedAt: new Date('2026-03-03T00:00:00.000Z'),
+          score: 0.5,
+          snippet: 'about graphs',
+        },
+      ]) // fuzzy fallback hit
+      .mockResolvedValueOnce([{ noteId: 'n1', name: 'math' }]); // tag rows
+
+    const out = await SearchService.getContext(userId, { topic: 'graf' });
+
+    expect(mockQueryRaw).toHaveBeenCalledTimes(3);
+    const fallbackSql = JSON.stringify(mockQueryRaw.mock.calls[1]);
+    expect(fallbackSql).toContain('similarity');
+
+    expect(out).toHaveLength(1);
+    expect(out[0].slug).toBe('graff-theory');
+    expect(out[0].score).toBe(0.5);
+    expect(out[0].tags).toEqual(['math']);
+  });
+
+  test('does not run the fallback when websearch returns rows', async () => {
+    mockQueryRaw
+      .mockResolvedValueOnce([
+        {
+          id: 'n1',
+          slug: 'exact',
+          title: 'Exact',
+          excerpt: 'e',
+          updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+          score: 0.9,
+          snippet: '<b>exact</b>',
+        },
+      ]) // main websearch hit
+      .mockResolvedValueOnce([]); // tag rows
+
+    await SearchService.getContext(userId, { topic: 'exact' });
+
+    expect(mockQueryRaw).toHaveBeenCalledTimes(2); // search + tagRows, NO fallback
+    const allSql = JSON.stringify(mockQueryRaw.mock.calls);
+    expect(allSql).not.toContain('similarity');
+  });
+});

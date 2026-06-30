@@ -2,6 +2,10 @@ import { DEFAULT_PAGE_LIMIT } from '@mycelium/shared';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../db.js';
 
+// Minimum pg_trgm title similarity for the fuzzy fallback when the
+// websearch_to_tsquery lexical query returns zero rows.
+const TRIGRAM_SIMILARITY_THRESHOLD = 0.3;
+
 function encodeCursor(note) {
   return Buffer.from(JSON.stringify({ rank: Number(note.rank), id: note.id })).toString('base64url');
 }
@@ -138,6 +142,21 @@ export const SearchService = {
       ORDER BY score DESC, n."updatedAt" DESC
       LIMIT ${limit}
     `;
+
+    // Lexical miss (typo / paraphrase) → pg_trgm fuzzy fallback on title.
+    if (results.length === 0) {
+      results = await prisma.$queryRaw`
+        SELECT n."id", n."slug", n."title", n."excerpt", n."updatedAt",
+               similarity(n."title", ${opts.topic}) AS score,
+               n."excerpt" AS snippet
+        FROM "Note" n
+        WHERE n."userId" = ${userId}
+          AND n."status" != 'ARCHIVED'
+          AND similarity(n."title", ${opts.topic}) > ${TRIGRAM_SIMILARITY_THRESHOLD}
+        ORDER BY score DESC, n."updatedAt" DESC
+        LIMIT ${limit}
+      `;
+    }
 
     const noteIds = results.map((note) => note.id);
     const tagRows = noteIds.length

@@ -110,4 +110,16 @@ describe('get_graph', () => {
     expect(parsed.error).toBe('Database error');
     expect(parsed.isRetryable).toBe(true);
   });
+
+  test('passes direction through to LinkService.getGraph', async () => {
+    mockLinkService.getGraph.mockImplementation(() => ({ nodes: [], edges: [] }));
+
+    await handler({ slug: 'center', depth: 2, direction: 'out' });
+
+    expect(mockLinkService.getGraph).toHaveBeenCalledWith('u1', {
+      slug: 'center',
+      depth: 2,
+      direction: 'out',
+    });
+  });
 });

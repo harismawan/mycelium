@@ -31,5 +31,6 @@ export {
   MAX_GRAPH_NODES,
   MAX_GRAPH_DEPTH,
   MAX_LINK_RESULTS,
+  RELATION_VOCAB,
 } from './constants.js';
 

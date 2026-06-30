@@ -68,3 +68,20 @@ export const MAX_GRAPH_DEPTH = 5;
  * @type {number}
  */
 export const MAX_LINK_RESULTS = 25;
+
+/**
+ * Canonical relation vocabulary for typed wikilinks (`[[relation: Title]]`).
+ *
+ * `extractWikilinks` only splits an inner `[[...]]` segment on its first colon
+ * when the prefix matches one of these values; otherwise the whole segment is
+ * treated as the title (so `[[Chapter 1: Intro]]` is preserved).
+ *
+ * @type {readonly string[]}
+ */
+export const RELATION_VOCAB = Object.freeze([
+  'supports',
+  'contradicts',
+  'derived-from',
+  'refines',
+  'related-to',
+]);

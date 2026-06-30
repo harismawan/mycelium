@@ -28,3 +28,21 @@ describe('graph budget constants', () => {
     expect(barrel.MAX_LINK_RESULTS).toBe(MAX_LINK_RESULTS);
   });
 });
+
+import { RELATION_VOCAB } from '../constants.js';
+
+describe('RELATION_VOCAB', () => {
+  test('contains the canonical relation vocabulary', () => {
+    expect(RELATION_VOCAB).toEqual([
+      'supports',
+      'contradicts',
+      'derived-from',
+      'refines',
+      'related-to',
+    ]);
+  });
+
+  test('is frozen', () => {
+    expect(Object.isFrozen(RELATION_VOCAB)).toBe(true);
+  });
+});

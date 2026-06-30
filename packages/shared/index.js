@@ -34,5 +34,7 @@ export {
   GRAPH_DECAY,
   RELATION_VOCAB,
   MEMORY_NAMESPACE_DIR,
+  EMBEDDING_DIMENSIONS,
+  RRF_K,
 } from './constants.js';
 

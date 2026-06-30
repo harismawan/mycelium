@@ -104,3 +104,20 @@ export const GRAPH_DECAY = 0.5;
  * @type {string}
  */
 export const MEMORY_NAMESPACE_DIR = 'memories';
+
+/**
+ * Embedding vector dimensionality for the optional semantic-search arm.
+ * Must match the `vector(N)` column in schema.prisma and the provider's
+ * configured output size.
+ *
+ * @type {number}
+ */
+export const EMBEDDING_DIMENSIONS = 1024;
+
+/**
+ * Reciprocal Rank Fusion constant. Fused score for a document is the sum of
+ * `1 / (RRF_K + rank)` across each candidate list it appears in (rank 0-based).
+ *
+ * @type {number}
+ */
+export const RRF_K = 60;

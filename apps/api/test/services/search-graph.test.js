@@ -12,6 +12,7 @@ const mockLink = {
   findMany: mock(() => []),
 };
 const mockQueryRaw = mock(() => []);
+const mockExecuteRaw = mock(() => 0);
 const mockDirectory = {
   findFirst: mock(() => null),
 };
@@ -22,6 +23,7 @@ mock.module('@prisma/client', () => ({
       this.note = mockNote;
       this.link = mockLink;
       this.$queryRaw = mockQueryRaw;
+      this.$executeRaw = mockExecuteRaw;
       this.directory = mockDirectory;
     }
   },
@@ -51,6 +53,7 @@ beforeEach(() => {
   mockNote.findFirst.mockReset();
   mockLink.findMany.mockReset();
   mockQueryRaw.mockReset();
+  mockExecuteRaw.mockReset();
   mockDirectory.findFirst.mockReset();
 });
 
@@ -959,5 +962,67 @@ describe('LinkService.getGraph — ego ranking & decay (R10)', () => {
     }
     // center + (MAX-1) neighbors kept ⇒ MAX-1 surviving edges
     expect(graph.edges).toHaveLength(MAX_GRAPH_NODES - 1);
+  });
+});
+
+// ===========================================================================
+// SearchService.getContext — write-on-read salience (R14.3)
+// ===========================================================================
+describe('SearchService.getContext — write-on-read salience', () => {
+  /** Validates: R14.3 — bump recency via raw UPDATE, never via prisma.note.update */
+  test('issues a raw UPDATE of lastAccessedAt/accessCount that never touches updatedAt', async () => {
+    mockNote.findMany.mockResolvedValue([
+      { id: 'n1', slug: 's1', title: 'A', excerpt: null, source: null, confidence: null, importance: null, tags: [], updatedAt: new Date('2026-01-01') },
+      { id: 'n2', slug: 's2', title: 'B', excerpt: null, source: null, confidence: null, importance: null, tags: [], updatedAt: new Date('2026-01-02') },
+    ]);
+
+    await SearchService.getContext(userId, { limit: 10 });
+
+    expect(mockExecuteRaw).toHaveBeenCalledTimes(1);
+    const [strings] = mockExecuteRaw.mock.calls[0];
+    const sql = strings.join(' ');
+    expect(sql).toContain('UPDATE "Note"');
+    expect(sql).toContain('"lastAccessedAt" = now()');
+    expect(sql).toContain('"accessCount" = "accessCount" + 1');
+    // Critical: must NOT bump @updatedAt
+    expect(sql).not.toContain('"updatedAt"');
+  });
+
+  test('does not issue an UPDATE when no notes are returned', async () => {
+    mockNote.findMany.mockResolvedValue([]);
+
+    await SearchService.getContext(userId, { limit: 10 });
+
+    expect(mockExecuteRaw).not.toHaveBeenCalled();
+  });
+
+  test('topic path: issues a raw UPDATE for the returned note ids', async () => {
+    mockQueryRaw
+      .mockResolvedValueOnce([
+        { id: 'n3', slug: 's3', title: 'C', excerpt: null, source: null, confidence: null, importance: null, updatedAt: new Date('2026-01-03'), score: 0.8, snippet: null },
+      ])
+      .mockResolvedValueOnce([]); // tag lookup
+
+    await SearchService.getContext(userId, { topic: 'test', limit: 5 });
+
+    expect(mockExecuteRaw).toHaveBeenCalledTimes(1);
+    const [strings] = mockExecuteRaw.mock.calls[0];
+    const sql = strings.join(' ');
+    expect(sql).toContain('UPDATE "Note"');
+    expect(sql).toContain('"lastAccessedAt" = now()');
+    expect(sql).toContain('"accessCount" = "accessCount" + 1');
+    expect(sql).not.toContain('"updatedAt"');
+  });
+
+  test('getContext still returns results even if the salience bump rejects', async () => {
+    mockNote.findMany.mockResolvedValue([
+      { id: 'n1', slug: 's1', title: 'A', excerpt: null, source: null, confidence: null, importance: null, tags: [], updatedAt: new Date('2026-01-01') },
+    ]);
+    mockExecuteRaw.mockRejectedValue(new Error('DB unavailable'));
+
+    const result = await SearchService.getContext(userId, { limit: 10 });
+
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe('n1');
   });
 });

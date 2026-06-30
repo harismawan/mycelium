@@ -308,6 +308,9 @@ export const SearchService = {
         include: { tags: true },
       });
 
+      // Fire-and-forget salience bump: never block or fail the read on it.
+      void this._touchAccess(notes.map((note) => note.id)).catch(() => {});
+
       return notes.map((note) => ({
         id: note.id,
         slug: note.slug,
@@ -370,6 +373,9 @@ export const SearchService = {
         return a.note.id < b.note.id ? -1 : a.note.id > b.note.id ? 1 : 0;
       });
 
+      // Fire-and-forget salience bump for expanded memories.
+      void this._touchAccess(scored.slice(0, limit).map((entry) => entry.note.id)).catch(() => {});
+
       return this._attachTags(scored.slice(0, limit).map((entry) => entry.note));
     }
 
@@ -404,6 +410,10 @@ export const SearchService = {
       // Fuse, then keep the top `limit`. The extra `rank` field is dropped by
       // _attachTags, so getContext's return shape is unchanged.
       const fused = rrfFuse([lexicalRows, vectorRows], RRF_K).slice(0, limit);
+
+      // Fire-and-forget salience bump for fused RRF memories.
+      void this._touchAccess(fused.map((n) => n.id)).catch(() => {});
+
       return this._attachTags(fused);
     }
 
@@ -440,6 +450,10 @@ export const SearchService = {
     }
 
     const noteIds = results.map((note) => note.id);
+
+    // Fire-and-forget salience bump for the matched memories.
+    void this._touchAccess(noteIds).catch(() => {});
+
     const tagRows = noteIds.length
       ? await prisma.$queryRaw`
           SELECT nt."A" AS "noteId", t."name"
@@ -508,5 +522,26 @@ export const SearchService = {
       tags: tagMap.get(note.id) ?? [],
       updatedAt: note.updatedAt instanceof Date ? note.updatedAt.toISOString() : note.updatedAt,
     }));
+  },
+
+  /**
+   * Best-effort recency/usage bump for the notes a read just returned.
+   *
+   * Uses a raw UPDATE — NOT `prisma.note.update` — so Prisma's `@updatedAt`
+   * mapping does not fire. Bumping `updatedAt` would corrupt both the recency
+   * signal this feature ranks on AND the human SPA's last-edited column.
+   *
+   * @param {string[]} noteIds
+   * @returns {Promise<void>}
+   * @private
+   */
+  async _touchAccess(noteIds) {
+    if (!noteIds.length) return;
+    await prisma.$executeRaw`
+      UPDATE "Note"
+      SET "lastAccessedAt" = now(),
+          "accessCount" = "accessCount" + 1
+      WHERE "id" IN (${Prisma.join(noteIds)})
+    `;
   },
 };

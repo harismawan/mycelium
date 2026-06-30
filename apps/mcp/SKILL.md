@@ -16,21 +16,22 @@ Read tools require `agent:read`:
 - `read_note`: full note by `slug`, `format: "json"` or `"markdown"`.
 - `list_tags`: all tags with non-archived note counts.
 - `list_directories`: nested directory tree with direct non-archived note counts.
-- `get_backlinks`, `get_outgoing_links`, `get_graph`: link and graph exploration.
-- `get_context`: session-start context by topic or recent notes.
+- `get_backlinks`, `get_outgoing_links`, `get_graph`: link and graph exploration. `get_graph` accepts optional `direction` (`"out"` | `"in"` | `"both"`, default `"both"`) to filter ego-subgraph edges.
+- `get_context`: session-start context by topic or recent notes. Optional `expand` (bool, default `false`) and `expandDepth` (int 1–3, default `1`): when `expand=true` and a topic is given, lexical hits are extended with co-cited graph neighbours (BFS up to `expandDepth` levels) and re-ranked.
 - `get_session_context`, `list_session_context`: ephemeral connection context.
 
 Write tools require `notes:write`:
 
-- `create_note`: create note with `title`, `content`, optional `status`, `tags`, `directoryId`.
-- `update_note`: update note by `slug`; supports `title`, `content`, `status`, `tags`, `directoryId`, `message`.
+- `create_note`: create note with `title`, `content`, optional `status`, `tags`, `directoryId`, `metadata`.
+- `update_note`: update note by `slug`; supports `title`, `content`, `status`, `tags`, `directoryId`, `message`, `metadata`.
 - `create_directory`: create root or nested directory with `name`, optional `parentId`.
 - `update_directory`: rename or move directory with `id`, optional `name`, `parentId`; cycles are rejected.
 - `delete_directory`: delete only empty directories.
-- `remember`: recall-then-upsert a durable memory tagged `agent-memory`. Matches an existing memory by exact title; `mode` is `append` (default, appends a timestamped section), `replace` (overwrite), or `new` (always create).
-- `save_memory`: thin alias for `remember` with append-on-duplicate (no `mode` parameter). Prefer `remember` when you need `replace` or `new`.
+- `remember`: recall-then-upsert a durable memory tagged `agent-memory`. Matches an existing memory by exact title; `mode` is `append` (default, appends a timestamped section), `replace` (overwrite), or `new` (always create). Optional `metadata` object (see Memory Rule).
+- `save_memory`: thin alias for `remember` with append-on-duplicate (no `mode` parameter). Prefer `remember` when you need `replace` or `new`. Optional `metadata` object (see Memory Rule).
 - `save_memories`: batch-file up to 25 findings in one call; each is published and tagged `agent-memory`. Returns a per-item result array `{index,id,slug,action,error}`; one bad item does not fail the rest.
 - `set_session_context`: store ephemeral per-session key/value context.
+- `promote_session_context`: flush ephemeral session-context entries into a single durable agent-memory note. `title` (required); optional `keys` array to select specific session keys (omit to promote all); optional `tags`. Always tagged `agent-memory`, filed under the agent's memory namespace. Requires `notes:write`.
 
 ## Operating Rules
 
@@ -63,7 +64,7 @@ Mycelium memory is a loop: recall before you write, consolidate so you do not du
 
 Because of this, put any fact you want to keep into a note via `save_memory`. Use session context only for short-lived state within a single working session.
 
-At session end, prefer `save_memories({ memories: [...] })` to flush several findings in one call instead of repeated `save_memory` calls. Inspect each item's `error` in the returned array and retry only the failed items.
+At session end, prefer `save_memories({ memories: [...] })` to flush several findings in one call instead of repeated `save_memory` calls. Inspect each item's `error` in the returned array and retry only the failed items. Alternatively, use `promote_session_context({ title, keys? })` to flush selected (or all) session-context keys into one durable agent-memory note — useful when the session scratch is already structured as key/value entries.
 
 ## Directory Workflow
 
@@ -90,6 +91,8 @@ To avoid duplicates, both recall an existing memory with the **exact same title*
 - `mode: "new"` always creates a fresh note (use a distinct title to avoid clutter).
 
 Reuse a stable title across sessions to let updates consolidate onto one note.
+
+Optional `metadata` object accepted by `remember`, `save_memory`, `create_note`, and `update_note`: `{ source?: string, confidence?: number, importance?: integer }`. The service clamps `confidence` to `[0, 1]` and `importance` to an integer in `[1, 5]`; high-importance notes are never auto-archived by the maintenance endpoint.
 
 ## Forgetting & maintenance
 

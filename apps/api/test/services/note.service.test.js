@@ -25,6 +25,7 @@ const mockTag = {
 const mockRevision = {
   create: mock(() => ({})),
 };
+const mockQueryRaw = mock(() => []);
 const mockSearchService = {
   search: mock(() => ({ notes: [], nextCursor: null })),
 };
@@ -52,6 +53,7 @@ mock.module('@prisma/client', () => ({
       this.tag = mockTag;
       this.revision = mockRevision;
       this.$transaction = mockTransaction;
+      this.$queryRaw = mockQueryRaw;
     }
   },
 }));
@@ -103,6 +105,7 @@ beforeEach(() => {
   mockLink.updateMany.mockReset();
   mockTag.findMany.mockReset();
   mockRevision.create.mockReset();
+  mockQueryRaw.mockReset();
   mockSearchService.search.mockReset();
   mockSearchService.search.mockResolvedValue({ notes: [], nextCursor: null });
   mockTransaction.mockReset();
@@ -984,5 +987,52 @@ describe('NoteService.updateNote — returns before snapshot', () => {
     expect(result.before.status).toBe('DRAFT');
     expect(result.before.tags).toEqual(['old-tag']);
     expect(result.before.content).toBe('Old content here');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// forgetStale
+// ---------------------------------------------------------------------------
+describe('NoteService.forgetStale', () => {
+  /** Validates: R14.4 — archives stale low-salience notes via archiveNote */
+  test('archives each stale candidate via archiveNote and returns the count', async () => {
+    mockQueryRaw.mockResolvedValue([{ slug: 'stale-1' }, { slug: 'stale-2' }]);
+    mockNote.findFirst
+      .mockResolvedValueOnce({ id: 'n1', title: 'Stale 1' })
+      .mockResolvedValueOnce({ id: 'n2', title: 'Stale 2' });
+    mockNote.update.mockResolvedValue({});
+
+    const result = await NoteService.forgetStale(userId, { olderThanDays: 30 });
+
+    expect(result).toEqual({ archived: 2 });
+    expect(mockNote.update).toHaveBeenCalledTimes(2);
+    expect(mockNote.update).toHaveBeenCalledWith({
+      where: { id: 'n1' },
+      data: { status: 'ARCHIVED' },
+    });
+  });
+
+  test('candidate query excludes archived/pinned/important and decays on last access', async () => {
+    mockQueryRaw.mockResolvedValue([]);
+
+    const result = await NoteService.forgetStale(userId, { olderThanDays: 90 });
+
+    expect(result).toEqual({ archived: 0 });
+    expect(mockNote.update).not.toHaveBeenCalled();
+    const [strings] = mockQueryRaw.mock.calls[0];
+    const sql = strings.join('');
+    expect(sql).toContain(`"status" != 'ARCHIVED'`);
+    expect(sql).toContain('"pinned" = false');
+    expect(sql).toContain('COALESCE(n."importance", 0)');
+    expect(sql).toContain('COALESCE(n."lastAccessedAt", n."createdAt")');
+  });
+
+  test('defaults to FORGET_STALE_DEFAULT_DAYS when olderThanDays omitted', async () => {
+    mockQueryRaw.mockResolvedValue([]);
+
+    const result = await NoteService.forgetStale(userId);
+
+    expect(result).toEqual({ archived: 0 });
+    expect(mockQueryRaw).toHaveBeenCalledTimes(1);
   });
 });

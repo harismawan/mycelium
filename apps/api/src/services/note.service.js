@@ -5,6 +5,8 @@ import {
   generateExcerpt,
   slugify,
   DEFAULT_PAGE_LIMIT,
+  FORGET_STALE_DEFAULT_DAYS,
+  FORGET_MIN_IMPORTANCE,
 } from '@mycelium/shared';
 import { prisma } from '../db.js';
 import { LinkService } from './link.service.js';
@@ -563,6 +565,44 @@ export const NoteService = {
     });
 
     return note;
+  },
+
+  /**
+   * Auto-archive stale, low-salience agent memories (soft-delete only).
+   *
+   * Candidate selection uses raw SQL because it must rank staleness off
+   * `COALESCE(lastAccessedAt, createdAt)` — an expression Prisma's query
+   * builder cannot express. Each candidate is then archived via the existing
+   * `archiveNote` soft-delete path; nothing is ever hard-deleted.
+   *
+   * Keep-signals: `pinned = true` (always kept) and R8 `importance` — a note
+   * with `COALESCE(importance,0) >= FORGET_MIN_IMPORTANCE` is kept.
+   *
+   * @param {string} userId
+   * @param {{ olderThanDays?: number }} [opts={}]
+   * @returns {Promise<{ archived: number }>}
+   */
+  async forgetStale(userId, opts = {}) {
+    const days = opts.olderThanDays ?? FORGET_STALE_DEFAULT_DAYS;
+    const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+    const candidates = await prisma.$queryRaw`
+      SELECT n."slug"
+      FROM "Note" n
+      WHERE n."userId" = ${userId}
+        AND n."status" != 'ARCHIVED'
+        AND n."pinned" = false
+        AND COALESCE(n."importance", 0) < ${FORGET_MIN_IMPORTANCE}
+        AND COALESCE(n."lastAccessedAt", n."createdAt") < ${cutoff}
+    `;
+
+    let archived = 0;
+    for (const { slug } of candidates) {
+      await this.archiveNote(userId, slug);
+      archived += 1;
+    }
+
+    return { archived };
   },
 
   /**

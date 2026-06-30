@@ -87,12 +87,15 @@ model Link {
   toId      String?
   toTitle   String?
   relation  String?
+  weight    Float    @default(1)
+  source    String   @default("wikilink")
   createdAt DateTime @default(now())
   from      Note     @relation("FromNote", fields: [fromId], references: [id], onDelete: Cascade)
   to        Note?    @relation("ToNote", fields: [toId], references: [id], onDelete: SetNull)
 
   @@index([fromId])
   @@index([toId])
+  @@index([fromId, source])
 }
 
 model Tag {

@@ -28,5 +28,8 @@ export {
   DEFAULT_PAGE_LIMIT,
   API_VERSION_PREFIX,
   SCOPES,
+  MAX_GRAPH_NODES,
+  MAX_GRAPH_DEPTH,
+  MAX_LINK_RESULTS,
 } from './constants.js';
 

@@ -8,6 +8,7 @@ import {
 } from '@mycelium/shared';
 import { prisma } from '../db.js';
 import { LinkService } from './link.service.js';
+import { embedText } from './embedding.service.js';
 import { SearchService } from './search.service.js';
 import { DirectoryService } from './directory.service.js';
 import { sanitizeMarkdown } from '../utils/sanitize.js';
@@ -43,6 +44,10 @@ export const NoteService = {
     const { frontmatter } = parseFrontmatter(content);
     const excerpt = generateExcerpt(content);
     const wikilinks = extractWikilinks(content);
+
+    // Compute the embedding OUTSIDE the transaction so an external embeddings
+    // HTTP call never holds a DB transaction open. null => arm disabled / failed.
+    const embedding = await embedText(`${title}\n\n${content}`);
 
     // Generate a unique slug. Read through `db` so that, inside a batch
     // transaction, earlier in-flight writes are visible; also dedup against
@@ -124,6 +129,9 @@ export const NoteService = {
 
     // Standalone path opens its own transaction (unchanged behavior).
     const note = await prisma.$transaction(runWrite);
+
+    // Persist the vector via raw SQL: Prisma cannot write Unsupported("vector").
+    if (embedding) await writeEmbedding(note.id, embedding);
 
     // Best-effort semantic auto-linking, outside the write transaction.
     await autoLinkSemantic(userId, note.id, title);
@@ -446,6 +454,11 @@ export const NoteService = {
     const wikilinks = extractWikilinks(content);
     const { frontmatter } = parseFrontmatter(content);
 
+    // Recompute the embedding only when the embedded text (title + content)
+    // actually changed, and always OUTSIDE the transaction.
+    const embeddingChanged = content !== existing.content || title !== existing.title;
+    const embedding = embeddingChanged ? await embedText(`${title}\n\n${content}`) : null;
+
     // Re-generate slug if title changed
     let newSlug = existing.slug;
     if (data.title && data.title !== existing.title) {
@@ -519,6 +532,9 @@ export const NoteService = {
 
       return updated;
     });
+
+    // Persist the vector via raw SQL: Prisma cannot write Unsupported("vector").
+    if (embedding) await writeEmbedding(note.id, embedding);
 
     return { note, before };
   },
@@ -657,6 +673,20 @@ function normalizeMetadata(metadata) {
     if (Number.isFinite(i)) out.importance = Math.min(5, Math.max(1, Math.round(i)));
   }
   return out;
+}
+
+/**
+ * Persist a note's embedding via raw SQL.
+ *
+ * `Note.embedding` is `Unsupported("vector(1024)")`, which the Prisma typed
+ * client cannot write — we format the array as a pgvector literal and cast it.
+ *
+ * @param {string} noteId - Target note id.
+ * @param {number[]} embedding - The embedding vector.
+ */
+async function writeEmbedding(noteId, embedding) {
+  const literal = `[${embedding.join(',')}]`;
+  await prisma.$executeRaw`UPDATE "Note" SET "embedding" = ${literal}::vector WHERE "id" = ${noteId}`;
 }
 
 /**

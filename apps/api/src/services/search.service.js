@@ -113,7 +113,7 @@ export const SearchService = {
       const notes = await prisma.note.findMany({
         where: { userId, status: { not: 'ARCHIVED' } },
         take: limit,
-        orderBy: { updatedAt: 'desc' },
+        orderBy: [{ pinned: 'desc' }, { updatedAt: 'desc' }, { id: 'asc' }],
         include: { tags: true },
       });
 
@@ -122,8 +122,6 @@ export const SearchService = {
         slug: note.slug,
         title: note.title,
         excerpt: note.excerpt,
-        score: null,
-        snippet: note.excerpt,
         tags: note.tags.map((tag) => tag.name),
         updatedAt: note.updatedAt.toISOString(),
       }));
@@ -132,6 +130,7 @@ export const SearchService = {
     const tsQuery = Prisma.sql`websearch_to_tsquery('english', ${opts.topic})`;
     let results = await prisma.$queryRaw`
       SELECT n."id", n."slug", n."title", n."excerpt", n."updatedAt",
+             n."pinned",
              ts_rank(n."searchVector", ${tsQuery}) AS score,
              ts_headline('english', n."content", ${tsQuery},
                'MaxFragments=2, MaxWords=30') AS snippet
@@ -139,7 +138,7 @@ export const SearchService = {
       WHERE n."userId" = ${userId}
         AND n."status" != 'ARCHIVED'
         AND n."searchVector" @@ ${tsQuery}
-      ORDER BY score DESC, n."updatedAt" DESC
+      ORDER BY n."pinned" DESC, score DESC, n."updatedAt" DESC
       LIMIT ${limit}
     `;
 

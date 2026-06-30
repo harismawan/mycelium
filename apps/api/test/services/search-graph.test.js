@@ -151,6 +151,47 @@ describe('SearchService.search', () => {
 });
 
 // ===========================================================================
+// SearchService.getContext — pinned + recency ordering (R4)
+// ===========================================================================
+describe('SearchService.getContext — ordering', () => {
+  test('no-topic branch orders by pinned, recency, then id', async () => {
+    const now = new Date('2026-06-29T00:00:00.000Z');
+    mockNote.findMany.mockResolvedValue([
+      { id: 'n1', slug: 'a', title: 'A', excerpt: null, tags: [{ name: 't' }], updatedAt: now },
+    ]);
+
+    const out = await SearchService.getContext(userId, {});
+
+    const arg = mockNote.findMany.mock.calls[0][0];
+    expect(arg.orderBy).toEqual([{ pinned: 'desc' }, { updatedAt: 'desc' }, { id: 'asc' }]);
+    expect(arg.where).toEqual({ userId, status: { not: 'ARCHIVED' } });
+    expect(out[0]).toEqual({
+      id: 'n1',
+      slug: 'a',
+      title: 'A',
+      excerpt: null,
+      tags: ['t'],
+      updatedAt: now.toISOString(),
+    });
+  });
+
+  test('topic branch puts pinned DESC ahead of ts_rank in the ORDER BY', async () => {
+    mockQueryRaw
+      .mockResolvedValueOnce([
+        { id: 'n1', slug: 'a', title: 'A', excerpt: null, updatedAt: new Date('2026-06-29T00:00:00.000Z') },
+      ])
+      .mockResolvedValueOnce([]); // tag-fetch query
+
+    await SearchService.getContext(userId, { topic: 'alpha' });
+
+    const orderSql = JSON.stringify(mockQueryRaw.mock.calls[0][0]);
+    expect(orderSql).toContain('pinned');
+    // pinned must be the primary sort key, ahead of ts_rank
+    expect(orderSql.indexOf('pinned')).toBeLessThan(orderSql.indexOf('ts_rank'));
+  });
+});
+
+// ===========================================================================
 // LinkService.getGraph — full graph
 // ===========================================================================
 describe('LinkService.getGraph — full graph', () => {

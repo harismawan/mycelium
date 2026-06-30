@@ -99,7 +99,7 @@ describe('SearchService.getContext score + snippet', () => {
     });
   });
 
-  test('recent-notes branch returns score:null and snippet=excerpt', async () => {
+  test('recent-notes branch returns id, slug, title, excerpt, tags, updatedAt (no score/snippet)', async () => {
     mockNote.findMany.mockResolvedValue([
       {
         id: 'n1',
@@ -113,10 +113,10 @@ describe('SearchService.getContext score + snippet', () => {
 
     const out = await SearchService.getContext(userId, {});
 
-    expect(out[0].score).toBeNull();
-    expect(out[0].snippet).toBe('recent excerpt');
     expect(out[0].tags).toEqual(['t1']);
     expect(out[0].updatedAt).toBe('2026-02-02T00:00:00.000Z');
+    expect(out[0].score).toBeUndefined();
+    expect(out[0].snippet).toBeUndefined();
   });
 });
 

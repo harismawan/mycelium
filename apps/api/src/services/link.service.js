@@ -167,6 +167,8 @@ export const LinkService = {
     const notes = await prisma.note.findMany({
       where: { id: { in: fromIds } },
       include: { tags: true },
+      orderBy: { updatedAt: 'desc' },
+      take: MAX_LINK_RESULTS,
     });
 
     return notes;
@@ -187,7 +189,8 @@ export const LinkService = {
     const resolvedLinks = links.filter((link) => link.toId !== null);
     const unresolved = links
       .filter((link) => link.toId === null && link.toTitle)
-      .map((link) => ({ title: link.toTitle }));
+      .map((link) => ({ title: link.toTitle }))
+      .slice(0, MAX_LINK_RESULTS);
 
     if (!resolvedLinks.length) {
       return { resolved: [], unresolved };
@@ -197,6 +200,8 @@ export const LinkService = {
     const targetNotes = await prisma.note.findMany({
       where: { id: { in: toIds } },
       select: { id: true, slug: true, title: true },
+      orderBy: { updatedAt: 'desc' },
+      take: MAX_LINK_RESULTS,
     });
 
     return {

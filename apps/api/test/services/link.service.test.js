@@ -1,4 +1,5 @@
 import { describe, test, expect, mock, beforeEach } from 'bun:test';
+import { MAX_LINK_RESULTS } from '@mycelium/shared';
 
 // ---------------------------------------------------------------------------
 // Mock setup
@@ -173,7 +174,54 @@ describe('LinkService.getBacklinks', () => {
     expect(mockNote.findMany).toHaveBeenCalledWith({
       where: { id: { in: ['note_a'] } },
       include: { tags: true },
+      orderBy: { updatedAt: 'desc' },
+      take: MAX_LINK_RESULTS,
     });
     expect(result).toHaveLength(1);
+  });
+
+  /** Validates: R5 — backlinks capped and ordered by recency */
+  test('caps backlinks to MAX_LINK_RESULTS ordered by recency', async () => {
+    mockLink.findMany.mockResolvedValue([{ fromId: 'note_a' }]);
+    mockNote.findMany.mockResolvedValue([
+      { id: 'note_a', title: 'A', slug: 'a', tags: [] },
+    ]);
+
+    await LinkService.getBacklinks('note_target');
+
+    const call = mockNote.findMany.mock.calls[0][0];
+    expect(call.take).toBe(MAX_LINK_RESULTS);
+    expect(call.orderBy).toEqual({ updatedAt: 'desc' });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getOutgoingLinks
+// ---------------------------------------------------------------------------
+describe('LinkService.getOutgoingLinks', () => {
+  /** Validates: R5 — resolved targets capped and ordered by recency */
+  test('caps resolved targets to MAX_LINK_RESULTS ordered by recency', async () => {
+    mockLink.findMany.mockResolvedValue([{ toId: 'note_x', toTitle: null }]);
+    mockNote.findMany.mockResolvedValue([{ id: 'note_x', slug: 'x', title: 'X' }]);
+
+    await LinkService.getOutgoingLinks('note_src');
+
+    const call = mockNote.findMany.mock.calls[0][0];
+    expect(call.take).toBe(MAX_LINK_RESULTS);
+    expect(call.orderBy).toEqual({ updatedAt: 'desc' });
+  });
+
+  /** Validates: R5 — unresolved list capped */
+  test('caps unresolved links to MAX_LINK_RESULTS', async () => {
+    const links = Array.from({ length: MAX_LINK_RESULTS + 5 }, (_, i) => ({
+      toId: null,
+      toTitle: `Missing ${i}`,
+    }));
+    mockLink.findMany.mockResolvedValue(links);
+
+    const result = await LinkService.getOutgoingLinks('note_src');
+
+    expect(result.unresolved).toHaveLength(MAX_LINK_RESULTS);
+    expect(result.resolved).toEqual([]);
   });
 });

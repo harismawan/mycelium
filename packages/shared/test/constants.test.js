@@ -3,6 +3,7 @@ import {
   MAX_GRAPH_NODES,
   MAX_GRAPH_DEPTH,
   MAX_LINK_RESULTS,
+  GRAPH_DECAY,
 } from '../constants.js';
 import * as barrel from '../index.js';
 
@@ -44,5 +45,17 @@ describe('RELATION_VOCAB', () => {
 
   test('is frozen', () => {
     expect(Object.isFrozen(RELATION_VOCAB)).toBe(true);
+  });
+});
+
+describe('GRAPH_DECAY', () => {
+  test('is a per-hop decay factor in the open interval (0, 1)', () => {
+    expect(typeof GRAPH_DECAY).toBe('number');
+    expect(GRAPH_DECAY).toBeGreaterThan(0);
+    expect(GRAPH_DECAY).toBeLessThan(1);
+  });
+
+  test('is re-exported from the package barrel', () => {
+    expect(barrel.GRAPH_DECAY).toBe(GRAPH_DECAY);
   });
 });

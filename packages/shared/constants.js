@@ -85,3 +85,14 @@ export const RELATION_VOCAB = Object.freeze([
   'refines',
   'related-to',
 ]);
+
+/**
+ * Per-hop decay factor applied when scoring ego-subgraph nodes.
+ *
+ * A node `h` hops from the ego center contributes
+ * `edgeWeight * GRAPH_DECAY ** h` to its accumulated score, so nearer nodes
+ * dominate the ranking. Range: (0, 1).
+ *
+ * @type {number}
+ */
+export const GRAPH_DECAY = 0.5;

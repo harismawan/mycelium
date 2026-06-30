@@ -22,6 +22,7 @@ const mockLink = {
 };
 const mockTag = { findMany: mock(() => []) };
 const mockRevision = { create: mock(() => ({})) };
+const mockQueryRaw = mock(async () => []);
 
 const mockTransaction = mock(async (arg) => {
   if (Array.isArray(arg)) return Promise.all(arg);
@@ -43,7 +44,13 @@ mock.module('@prisma/client', () => ({
       this.tag = mockTag;
       this.revision = mockRevision;
       this.$transaction = mockTransaction;
+      this.$queryRaw = mockQueryRaw;
     }
+  },
+  Prisma: {
+    sql: (strings, ...values) => ({ strings, values, type: 'sql' }),
+    join: (items, sep) => ({ items, sep, type: 'join' }),
+    empty: { type: 'empty' },
   },
 }));
 
@@ -66,6 +73,7 @@ beforeEach(() => {
   mockTag.findMany.mockReset();
   mockRevision.create.mockReset();
   mockTransaction.mockReset();
+  mockQueryRaw.mockReset();
 
   mockTransaction.mockImplementation(async (arg) => {
     if (Array.isArray(arg)) return Promise.all(arg);

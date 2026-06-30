@@ -146,9 +146,10 @@ export const NoteService = {
    *
    * @param {string} userId
    * @param {{ title: string, content: string, tags?: string[], mode?: 'append'|'replace'|'new', authType?: string, apiKeyId?: string, apiKeyName?: string }} data
+   * @param {{ tx?: import('@prisma/client').Prisma.TransactionClient, reservedSlugs?: Set<string> }} [opts={}] - Inject `tx` / `reservedSlugs` from a batch caller (e.g. `createMemories`). Omit for standalone behaviour — identical to before R12.2.
    * @returns {Promise<{ id: string, slug: string, action: 'created'|'updated', excerpt: string }>}
    */
-  async upsertMemory(userId, data) {
+  async upsertMemory(userId, data, opts = {}) {
     const { title, content, tags = [], mode = 'append', metadata, authType, apiKeyId, apiKeyName } = data;
     const auth = { authType, apiKeyId, apiKeyName };
     const memoryTags = [...new Set([...tags, 'agent-memory'])];
@@ -164,13 +165,15 @@ export const NoteService = {
         directoryId: memoriesDirectory.id,
         metadata,
         ...auth,
-      });
+      }, opts);
       return { id: created.id, slug: created.slug, action: 'created', excerpt: created.excerpt };
     }
 
     // Recall: resolve an existing agent-memory by EXACT title, scoped to the
     // owning user. findFirst on title (NOT slug). orderBy keeps the freshest.
-    const existing = await prisma.note.findFirst({
+    // Use the injected tx client when present so the read is in the same snapshot.
+    const db = opts.tx ?? prisma;
+    const existing = await db.note.findFirst({
       where: {
         userId,
         title,
@@ -191,11 +194,13 @@ export const NoteService = {
         directoryId: memoriesDirectory.id,
         metadata,
         ...auth,
-      });
+      }, opts);
       return { id: created.id, slug: created.slug, action: 'created', excerpt: created.excerpt };
     }
 
     // Consolidate into the existing memory.
+    // Note: updateNote always opens its own prisma.$transaction and does not
+    // accept a tx injection, so this path is outside the caller's transaction.
     const nextContent =
       mode === 'replace'
         ? content
@@ -209,6 +214,82 @@ export const NoteService = {
       ...auth,
     });
     return { id: note.id, slug: note.slug, action: 'updated', excerpt: note.excerpt };
+  },
+
+  /**
+   * Batch-create memory notes in a single transaction, best-effort per item.
+   *
+   * Each item runs through `upsertMemory` (or `createNote` when upsertMemory is
+   * absent), sharing one transaction and one in-flight slug-reservation set so a
+   * session-end flush of N findings is one DB round trip. A single failing item
+   * is captured in its result `error` and does not abort the survivors.
+   *
+   * @param {string} userId - ID of the owning user.
+   * @param {Array<{ title: string, content: string, status?: string, tags?: string[], directoryId?: string | null, mode?: string, authType?: string, apiKeyId?: string, apiKeyName?: string }>} memories
+   * @param {{ tx?: import('@prisma/client').Prisma.TransactionClient }} [opts={}] - Inject `tx` to compose this batch inside a larger transaction.
+   * @returns {Promise<Array<{ index: number, id: string | null, slug: string | null, action: 'created' | 'updated' | null, error: string | null }>>}
+   */
+  async createMemories(userId, memories, opts = {}) {
+    const run = async (tx) => {
+      const reservedSlugs = new Set();
+      const results = [];
+
+      for (let index = 0; index < memories.length; index++) {
+        const memory = memories[index];
+        try {
+          let id;
+          let slug;
+          let action;
+
+          if (typeof NoteService.upsertMemory === 'function') {
+            // Delegate to upsertMemory so the batch also consolidates duplicates.
+            const upserted = await NoteService.upsertMemory(
+              userId,
+              memory,
+              { tx, reservedSlugs },
+            );
+            id = upserted.id;
+            slug = upserted.slug;
+            action = upserted.action;
+          } else {
+            const note = await NoteService.createNote(
+              userId,
+              {
+                title: memory.title,
+                content: memory.content,
+                status: memory.status ?? 'PUBLISHED',
+                tags: memory.tags,
+                directoryId: memory.directoryId,
+                authType: memory.authType,
+                apiKeyId: memory.apiKeyId,
+                apiKeyName: memory.apiKeyName,
+              },
+              { tx, reservedSlugs },
+            );
+            id = note.id;
+            slug = note.slug;
+            action = 'created';
+          }
+
+          results.push({ index, id, slug, action, error: null });
+        } catch (err) {
+          results.push({
+            index,
+            id: null,
+            slug: null,
+            action: null,
+            error: err?.message ?? String(err),
+          });
+        }
+      }
+
+      return results;
+    };
+
+    if (opts.tx) {
+      return run(opts.tx);
+    }
+    return prisma.$transaction(run);
   },
 
   /**

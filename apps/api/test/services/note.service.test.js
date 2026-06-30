@@ -870,6 +870,80 @@ describe('NoteService.deleteNote', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// createMemories — batch save (R12.2)
+// ---------------------------------------------------------------------------
+describe('NoteService.createMemories', () => {
+  test('creates all items in one transaction with per-item created results', async () => {
+    // createMemories delegates to upsertMemory — mock it to control results
+    // without pulling in the full upsertMemory pipeline (directories, recalls).
+    const originalUpsert = NoteService.upsertMemory;
+    const upsert = mock()
+      .mockResolvedValueOnce({ id: 'n1', slug: 'alpha', action: 'created', excerpt: 'a' })
+      .mockResolvedValueOnce({ id: 'n2', slug: 'beta', action: 'created', excerpt: 'b' });
+    NoteService.upsertMemory = upsert;
+    try {
+      const results = await NoteService.createMemories(userId, [
+        { title: 'Alpha', content: 'a' },
+        { title: 'Beta', content: 'b' },
+      ]);
+
+      // One transaction wraps the whole batch; inner upsertMemory calls reuse it.
+      expect(mockTransaction).toHaveBeenCalledTimes(1);
+      expect(results).toEqual([
+        { index: 0, id: 'n1', slug: 'alpha', action: 'created', error: null },
+        { index: 1, id: 'n2', slug: 'beta', action: 'created', error: null },
+      ]);
+    } finally {
+      NoteService.upsertMemory = originalUpsert;
+    }
+  });
+
+  test('is best-effort: a bad item is captured without aborting the rest', async () => {
+    const originalUpsert = NoteService.upsertMemory;
+    const upsert = mock()
+      .mockResolvedValueOnce({ id: 'ok', slug: 'ok', action: 'created', excerpt: 'e' })
+      .mockRejectedValueOnce({ statusCode: 404, message: 'Directory not found' });
+    NoteService.upsertMemory = upsert;
+    try {
+      const results = await NoteService.createMemories(userId, [
+        { title: 'Good', content: 'a' },
+        { title: 'Bad', content: 'b', directoryId: 'missing-dir' },
+      ]);
+
+      expect(results[0]).toEqual({ index: 0, id: 'ok', slug: 'ok', action: 'created', error: null });
+      expect(results[1].index).toBe(1);
+      expect(results[1].id).toBeNull();
+      expect(results[1].action).toBeNull();
+      expect(results[1].error).toBe('Directory not found');
+    } finally {
+      NoteService.upsertMemory = originalUpsert;
+    }
+  });
+
+  test('delegates to upsertMemory when present, forwarding the shared tx', async () => {
+    const upsert = mock(async () => ({ id: 'up1', slug: 'consolidated', action: 'updated', excerpt: 'x' }));
+    NoteService.upsertMemory = upsert;
+    try {
+      const results = await NoteService.createMemories(userId, [
+        { title: 'Topic', content: 'c', tags: ['t'], mode: 'append' },
+      ]);
+
+      expect(upsert).toHaveBeenCalledTimes(1);
+      const [calledUserId, calledData, calledOpts] = upsert.mock.calls[0];
+      expect(calledUserId).toBe(userId);
+      expect(calledData).toEqual({ title: 'Topic', content: 'c', tags: ['t'], mode: 'append' });
+      expect(calledOpts.tx).toBeDefined();
+      expect(calledOpts.reservedSlugs instanceof Set).toBe(true);
+      expect(results[0]).toEqual({
+        index: 0, id: 'up1', slug: 'consolidated', action: 'updated', error: null,
+      });
+    } finally {
+      delete NoteService.upsertMemory;
+    }
+  });
+});
+
 describe('NoteService.updateNote — returns before snapshot', () => {
   test('returns { note, before } with pre-update field values', async () => {
     const existing = {

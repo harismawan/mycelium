@@ -175,6 +175,11 @@ export const GraphResponse = t.Object({
     }),
     { description: 'Graph edges representing links between notes' },
   ),
+  truncated: t.Optional(
+    t.Boolean({
+      description: 'True when the node set was capped at MAX_GRAPH_NODES; some nodes/edges omitted',
+    }),
+  ),
 });
 
 // ─── API Key Responses ───────────────────────────────────────────────────────

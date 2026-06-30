@@ -84,6 +84,21 @@ describe('NoteService.createNote — embedding', () => {
   });
 });
 
+describe('NoteService.createNote — embedding (resilience)', () => {
+  test('resolves successfully when $executeRaw throws (best-effort write)', async () => {
+    mockEmbedText.mockResolvedValue(vector);
+    mockNote.findMany.mockResolvedValue([]);
+    mockNote.create.mockResolvedValue({ id: 'note_1', slug: 'my-note', title: 'My Note', tags: [], revisions: [] });
+    mockLink.updateMany.mockResolvedValue({ count: 0 });
+    mockExecuteRaw.mockRejectedValue(new Error('dimension mismatch'));
+
+    const result = await NoteService.createNote(userId, { title: 'My Note', content: 'Hello world' });
+
+    // Note is returned; no error propagated despite $executeRaw throwing.
+    expect(result).toMatchObject({ id: 'note_1' });
+  });
+});
+
 describe('NoteService.updateNote — embedding', () => {
   const existing = {
     id: 'note_1', slug: 'my-note', title: 'My Note', status: 'DRAFT',

@@ -47,7 +47,8 @@ export const NoteService = {
 
     // Compute the embedding OUTSIDE the transaction so an external embeddings
     // HTTP call never holds a DB transaction open. null => arm disabled / failed.
-    const embedding = await embedText(`${title}\n\n${content}`);
+    // Skip on the batch (injected-tx) path — the result would be discarded anyway.
+    const embedding = opts.tx ? null : await embedText(`${title}\n\n${content}`);
 
     // Generate a unique slug. Read through `db` so that, inside a batch
     // transaction, earlier in-flight writes are visible; also dedup against
@@ -686,7 +687,12 @@ function normalizeMetadata(metadata) {
  */
 async function writeEmbedding(noteId, embedding) {
   const literal = `[${embedding.join(',')}]`;
-  await prisma.$executeRaw`UPDATE "Note" SET "embedding" = ${literal}::vector WHERE "id" = ${noteId}`;
+  try {
+    await prisma.$executeRaw`UPDATE "Note" SET "embedding" = ${literal}::vector WHERE "id" = ${noteId}`;
+  } catch {
+    // Best-effort: a dimension mismatch or DB error must not fail the note write
+    // that already committed. Silently swallow so callers always resolve.
+  }
 }
 
 /**

@@ -1,4 +1,5 @@
 import { describe, test, expect, mock, beforeEach } from 'bun:test';
+import { MAX_GRAPH_NODES, MAX_GRAPH_DEPTH } from '@mycelium/shared';
 
 // ---------------------------------------------------------------------------
 // Mock setup — must happen before any import that touches Prisma
@@ -211,6 +212,59 @@ describe('LinkService.getGraph — full graph', () => {
     expect(graph.nodes).toHaveLength(1);
     expect(graph.edges).toHaveLength(0);
   });
+
+  /** Validates: R5 — full-graph node cap */
+  test('caps full graph to MAX_GRAPH_NODES and flags truncated', async () => {
+    const fetched = Array.from({ length: MAX_GRAPH_NODES + 1 }, (_, i) => ({
+      id: `n${i}`, slug: `s${i}`, title: `T${i}`, status: 'PUBLISHED',
+    }));
+    mockNote.findMany.mockResolvedValue(fetched);
+    mockLink.findMany.mockResolvedValue([]);
+
+    const graph = await LinkService.getGraph(userId);
+
+    expect(graph.nodes).toHaveLength(MAX_GRAPH_NODES);
+    expect(graph.truncated).toBe(true);
+  });
+
+  /** Validates: R5 — recency ordering + over-fetch by one */
+  test('orders full graph by recency and fetches one over the cap', async () => {
+    mockNote.findMany.mockResolvedValue([]);
+
+    await LinkService.getGraph(userId);
+
+    const call = mockNote.findMany.mock.calls[0][0];
+    expect(call.orderBy).toEqual({ updatedAt: 'desc' });
+    expect(call.take).toBe(MAX_GRAPH_NODES + 1);
+  });
+
+  /** Validates: R5 — no truncation under the cap */
+  test('does not flag truncated when under the cap', async () => {
+    mockNote.findMany.mockResolvedValue([
+      { id: 'n1', slug: 'a', title: 'A', status: 'PUBLISHED' },
+    ]);
+    mockLink.findMany.mockResolvedValue([]);
+
+    const graph = await LinkService.getGraph(userId);
+
+    expect(graph.truncated).toBe(false);
+  });
+
+  /** Validates: R5 — dangling edges to capped-out nodes are trimmed */
+  test('trims edges dangling to nodes dropped by the cap', async () => {
+    const fetched = Array.from({ length: MAX_GRAPH_NODES + 1 }, (_, i) => ({
+      id: `n${i}`, slug: `s${i}`, title: `T${i}`, status: 'PUBLISHED',
+    }));
+    mockNote.findMany.mockResolvedValue(fetched);
+    // Edge from the first kept node to the node the cap drops (index MAX_GRAPH_NODES).
+    mockLink.findMany.mockResolvedValue([
+      { fromId: 'n0', toId: `n${MAX_GRAPH_NODES}`, relation: null },
+    ]);
+
+    const graph = await LinkService.getGraph(userId);
+
+    expect(graph.edges).toHaveLength(0);
+  });
 });
 
 // ===========================================================================
@@ -304,5 +358,47 @@ describe('LinkService.getGraph — ego-subgraph', () => {
     expect(graph.nodes).toHaveLength(1);
     // Edge to archived note should be filtered out
     expect(graph.edges).toHaveLength(0);
+  });
+
+  /** Validates: R5 — depth above MAX_GRAPH_DEPTH is clamped */
+  test('clamps depth above MAX_GRAPH_DEPTH', async () => {
+    const start = { id: 'n0', slug: 'a', title: 'A', status: 'PUBLISHED' };
+    mockNote.findFirst.mockResolvedValue(start);
+
+    let counter = 0;
+    // Out-links query is the one whose `where.fromId` is `{ in: frontier }`.
+    // The in-links query passes `where.fromId = { not: undefined }` (no `.in`),
+    // so discriminate on `where.fromId?.in` — NOT on `where.fromId` (which is
+    // truthy for BOTH queries and would make the in-links branch throw).
+    mockLink.findMany.mockImplementation(({ where }) => {
+      if (where.fromId?.in) {
+        const from = where.fromId.in[0];
+        counter += 1;
+        return Promise.resolve([{ fromId: from, toId: `n${counter}`, relation: null }]);
+      }
+      return Promise.resolve([]); // inLinks
+    });
+    // Neighbor lookup returns the fresh node so BFS would otherwise expand forever.
+    mockNote.findMany.mockImplementation(({ where }) => {
+      const id = where.id.in[0];
+      return Promise.resolve([{ id, slug: id, title: id, status: 'PUBLISHED' }]);
+    });
+
+    await LinkService.getGraph(userId, { slug: 'a', depth: 999 });
+
+    // BFS must stop after MAX_GRAPH_DEPTH levels → 2 link.findMany calls per level.
+    expect(mockLink.findMany).toHaveBeenCalledTimes(MAX_GRAPH_DEPTH * 2);
+  });
+
+  /** Validates: R5 — non-numeric depth coerces to the default of 1 */
+  test('coerces non-numeric depth to 1', async () => {
+    const start = { id: 'n0', slug: 'a', title: 'A', status: 'PUBLISHED' };
+    mockNote.findFirst.mockResolvedValue(start);
+    mockLink.findMany.mockResolvedValue([]); // no neighbors → BFS stops after level 1
+
+    await LinkService.getGraph(userId, { slug: 'a', depth: 'not-a-number' });
+
+    // depth coerced to 1 → exactly one BFS level → 2 link.findMany calls (out + in)
+    expect(mockLink.findMany).toHaveBeenCalledTimes(2);
   });
 });

@@ -1,4 +1,20 @@
 import { prisma } from '../db.js';
+import { MAX_GRAPH_NODES, MAX_GRAPH_DEPTH, MAX_LINK_RESULTS } from '@mycelium/shared';
+
+/**
+ * Coerce and clamp a requested BFS depth into the safe range [1, MAX_GRAPH_DEPTH].
+ *
+ * Non-numeric, non-finite, or absent values fall back to the default depth of 1.
+ * Values above MAX_GRAPH_DEPTH are clamped down; values below 1 are clamped up.
+ *
+ * @param {unknown} depth - Raw depth from a caller (route query, MCP arg, etc.).
+ * @returns {number} A safe integer depth in [1, MAX_GRAPH_DEPTH].
+ */
+function clampDepth(depth) {
+  const n = Number(depth);
+  if (!Number.isFinite(n)) return 1;
+  return Math.min(Math.max(Math.trunc(n), 1), MAX_GRAPH_DEPTH);
+}
 
 /**
  * Link service providing standalone wikilink reconciliation,
@@ -225,7 +241,8 @@ export const LinkService = {
    * Validates: Requirements 7.1, 7.2, 7.3
    */
   async getGraph(userId, opts = {}) {
-    const { slug, depth = 1 } = opts;
+    const { slug } = opts;
+    const depth = clampDepth(opts.depth);
 
     if (!slug) {
       return this._getFullGraph(userId);
@@ -242,14 +259,21 @@ export const LinkService = {
    * @private
    */
   async _getFullGraph(userId) {
-    const notes = await prisma.note.findMany({
+    // Fetch one more than the cap so truncation is detectable, ordered by recency
+    // so the most recently touched notes survive the cap.
+    const fetched = await prisma.note.findMany({
       where: { userId, status: { not: 'ARCHIVED' } },
       select: { id: true, slug: true, title: true, status: true },
+      orderBy: { updatedAt: 'desc' },
+      take: MAX_GRAPH_NODES + 1,
     });
 
-    if (!notes.length) {
-      return { nodes: [], edges: [] };
+    if (!fetched.length) {
+      return { nodes: [], edges: [], truncated: false };
     }
+
+    const truncated = fetched.length > MAX_GRAPH_NODES;
+    const notes = truncated ? fetched.slice(0, MAX_GRAPH_NODES) : fetched;
 
     const noteIds = new Set(notes.map((n) => n.id));
 
@@ -261,12 +285,13 @@ export const LinkService = {
       select: { fromId: true, toId: true, relation: true },
     });
 
-    // Only include edges where both endpoints are in the node set
+    // Only include edges where both endpoints are in the (possibly capped) node set,
+    // which also trims edges dangling to nodes dropped by the cap.
     const edges = links
       .filter((l) => noteIds.has(l.toId))
       .map((l) => ({ fromId: l.fromId, toId: l.toId, relation: l.relation ?? null }));
 
-    return { nodes: notes, edges };
+    return { nodes: notes, edges, truncated };
   },
 
   /**
@@ -286,7 +311,7 @@ export const LinkService = {
     });
 
     if (!startNote) {
-      return { nodes: [], edges: [] };
+      return { nodes: [], edges: [], truncated: false };
     }
 
     /** @type {Map<string, GraphNode>} */
@@ -346,9 +371,16 @@ export const LinkService = {
       }
     }
 
-    // Filter edges to only include those where both endpoints are in visited set
-    const validEdges = edges.filter((e) => visited.has(e.fromId) && visited.has(e.toId));
+    // Cap to MAX_GRAPH_NODES; the visited Map preserves BFS insertion order, so the
+    // start node and nearest neighbors survive the cap.
+    const allNodes = [...visited.values()];
+    const truncated = allNodes.length > MAX_GRAPH_NODES;
+    const nodes = truncated ? allNodes.slice(0, MAX_GRAPH_NODES) : allNodes;
 
-    return { nodes: [...visited.values()], edges: validEdges };
+    // Re-derive the surviving id set, then keep only edges with both endpoints present.
+    const keptIds = new Set(nodes.map((n) => n.id));
+    const validEdges = edges.filter((e) => keptIds.has(e.fromId) && keptIds.has(e.toId));
+
+    return { nodes, edges: validEdges, truncated };
   },
 };

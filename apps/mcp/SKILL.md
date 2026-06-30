@@ -38,7 +38,7 @@ Preserve user content. When updating, keep existing structure, wikilinks, tags, 
 
 Use wikilinks for durable relationships: `[[Related Note Title]]`. The save pipeline extracts and reconciles links.
 
-Use session context for temporary state only. Use `set_session_context` for connection-local scratch information and `save_memory` for durable facts that should survive future sessions.
+Use session context for temporary state only. Use `set_session_context` for short-lived scratch that is scoped to your Mycelium user account (shared across all your connections and API keys, and unreliable; see Session Context Lifecycle), and `save_memory` for durable facts that should survive future sessions.
 
 ## Memory Loop
 

@@ -1,6 +1,7 @@
 import { DEFAULT_PAGE_LIMIT } from '@mycelium/shared';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../db.js';
+import { LinkService } from './link.service.js';
 
 // Minimum pg_trgm title similarity for the fuzzy fallback when the
 // websearch_to_tsquery lexical query returns zero rows.
@@ -11,6 +12,23 @@ const TRIGRAM_SIMILARITY_THRESHOLD = 0.3;
  * `importance` is agent-supplied and gameable — keep this weight low and tunable.
  */
 const IMPORTANCE_BOOST = 0.15;
+
+/** Weight applied to the normalized graph (co-citation) boost in expanded recall. */
+const GRAPH_BOOST_WEIGHT = 0.3;
+/** Hard cap on BFS depth for graph-aware expansion (defensive; mirrors the tool's zod max). */
+const MAX_EXPAND_DEPTH = 3;
+
+/** Clamp an arbitrary expandDepth input to [1, MAX_EXPAND_DEPTH]. */
+function clampExpandDepth(depth) {
+  const d = Math.trunc(Number(depth) || 1);
+  return Math.min(Math.max(d, 1), MAX_EXPAND_DEPTH);
+}
+
+/** Min-max normalize a value into 0..1; returns 1 when all values are equal. */
+function minMaxNormalize(value, min, max) {
+  if (max === min) return 1;
+  return (value - min) / (max - min);
+}
 
 function encodeCursor(note) {
   const updatedAt =
@@ -136,8 +154,13 @@ export const SearchService = {
    * With a topic, this uses the same full-text search ranking as `search`.
    * Without a topic, this returns the most recently updated non-archived notes.
    *
+   * When `expand` is true and a topic is given, the lexical seeds are augmented
+   * with graph neighbors that the seeds co-cite (`_expandNeighbors`), then the
+   * combined set is re-ranked with a min-max-normalized lexical + co-citation
+   * blend. The returned array shape is identical to the flat path either way.
+   *
    * @param {string} userId
-   * @param {{ topic?: string, limit?: number }} [opts={}]
+   * @param {{ topic?: string, limit?: number, expand?: boolean, expandDepth?: number }} [opts={}]
    * @returns {Promise<Array<{ id: string, slug: string, title: string, excerpt: string | null, source: string | null, confidence: number | null, importance: number | null, score: number | null, snippet: string | null, tags: string[], updatedAt: string }>>}
    */
   async getContext(userId, opts = {}) {
@@ -167,6 +190,55 @@ export const SearchService = {
     }
 
     const tsQuery = Prisma.sql`websearch_to_tsquery('english', ${opts.topic})`;
+
+    // Graph-aware expansion: use a lean seed query (ts_rank AS rank), blend with
+    // graph co-citation scores, then return the minimal canonical shape.
+    if (opts.expand) {
+      const seedRows = await prisma.$queryRaw`
+        SELECT n."id", n."slug", n."title", n."excerpt", n."updatedAt",
+               ts_rank(n."searchVector", ${tsQuery}) AS rank
+        FROM "Note" n
+        WHERE n."userId" = ${userId}
+          AND n."status" != 'ARCHIVED'
+          AND n."searchVector" @@ ${tsQuery}
+        ORDER BY rank DESC, n."updatedAt" DESC
+        LIMIT ${limit}
+      `;
+
+      if (seedRows.length === 0) return [];
+
+      const depth = clampExpandDepth(opts.expandDepth ?? 1);
+      const seedIds = seedRows.map((r) => r.id);
+      const numSeeds = seedIds.length;
+      const neighbors = await LinkService._expandNeighbors(userId, seedIds, depth);
+
+      const ranks = seedRows.map((r) => Number(r.rank));
+      const minRank = Math.min(...ranks);
+      const maxRank = Math.max(...ranks);
+
+      const scored = [
+        ...seedRows.map((row) => ({
+          note: row,
+          score: minMaxNormalize(Number(row.rank), minRank, maxRank),
+        })),
+        ...neighbors.map((neighbor) => ({
+          note: neighbor,
+          score: GRAPH_BOOST_WEIGHT * (neighbor.seedLinks / numSeeds),
+        })),
+      ];
+
+      scored.sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        const at = new Date(a.note.updatedAt).getTime();
+        const bt = new Date(b.note.updatedAt).getTime();
+        if (bt !== at) return bt - at;
+        return a.note.id < b.note.id ? -1 : a.note.id > b.note.id ? 1 : 0;
+      });
+
+      return this._attachTags(scored.slice(0, limit).map((entry) => entry.note));
+    }
+
+    // Flat lexical path (expand=false / default): preserve the original behavior.
     let results = await prisma.$queryRaw`
       SELECT n."id", n."slug", n."title", n."excerpt", n."source", n."confidence", n."importance", n."updatedAt",
              n."pinned",
@@ -223,6 +295,45 @@ export const SearchService = {
       importance: note.importance,
       score: note.score == null ? null : Number(note.score),
       snippet: note.snippet ?? note.excerpt,
+      tags: tagMap.get(note.id) ?? [],
+      updatedAt: note.updatedAt instanceof Date ? note.updatedAt.toISOString() : note.updatedAt,
+    }));
+  },
+
+  /**
+   * Hydrate tags onto a list of note rows and project them into the canonical
+   * getContext shape for the expand=true path: `{ id, slug, title, excerpt, tags, updatedAt }`.
+   *
+   * Drops internal fields (e.g. `rank`, `seedLinks`) so the returned shape is
+   * consistent for seeds and graph-expanded neighbors alike.
+   *
+   * @param {Array<{ id: string, slug: string, title: string, excerpt: string|null, updatedAt: Date|string }>} rows
+   * @returns {Promise<Array<{ id: string, slug: string, title: string, excerpt: string|null, tags: string[], updatedAt: string }>>}
+   * @private
+   */
+  async _attachTags(rows) {
+    const noteIds = rows.map((note) => note.id);
+    const tagRows = noteIds.length
+      ? await prisma.$queryRaw`
+          SELECT nt."A" AS "noteId", t."name"
+          FROM "_NoteToTag" nt
+          INNER JOIN "Tag" t ON t."id" = nt."B"
+          WHERE nt."A" IN (${Prisma.join(noteIds)})
+        `
+      : [];
+
+    const tagMap = new Map();
+    for (const row of tagRows) {
+      const tags = tagMap.get(row.noteId) ?? [];
+      tags.push(row.name);
+      tagMap.set(row.noteId, tags);
+    }
+
+    return rows.map((note) => ({
+      id: note.id,
+      slug: note.slug,
+      title: note.title,
+      excerpt: note.excerpt,
       tags: tagMap.get(note.id) ?? [],
       updatedAt: note.updatedAt instanceof Date ? note.updatedAt.toISOString() : note.updatedAt,
     }));

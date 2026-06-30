@@ -711,3 +711,109 @@ describe('LinkService._expandNeighbors', () => {
     expect(out.every((n) => n.seedLinks === 1)).toBe(true);
   });
 });
+
+// ===========================================================================
+// SearchService.getContext — graph-aware expansion (R9)
+// ===========================================================================
+describe('SearchService.getContext — expand', () => {
+  /** Validates: Requirements 9.3 */
+  test('expand=false returns the flat lexical array unchanged (no rank, no expansion)', async () => {
+    const date = new Date('2026-01-05');
+    mockQueryRaw
+      .mockResolvedValueOnce([
+        { id: 's1', slug: 's1', title: 'S1', excerpt: 'ex1', updatedAt: date, rank: 0.9 },
+      ]) // seed query
+      .mockResolvedValueOnce([{ noteId: 's1', name: 'tag-a' }]); // tag hydration
+
+    const out = await SearchService.getContext(userId, { topic: 'hello', limit: 10 });
+
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({
+      id: 's1',
+      slug: 's1',
+      title: 'S1',
+      excerpt: 'ex1',
+      tags: ['tag-a'],
+      updatedAt: date.toISOString(),
+    });
+    expect(out[0]).not.toHaveProperty('rank');
+    // No graph traversal on the flat path
+    expect(mockLink.findMany).not.toHaveBeenCalled();
+  });
+
+  /** Validates: Requirements 9.1, 9.2 */
+  test('expand=true surfaces a co-cited neighbor above a weak seed', async () => {
+    const date = new Date('2026-01-05');
+    mockQueryRaw
+      .mockResolvedValueOnce([
+        { id: 's1', slug: 's1', title: 'S1', excerpt: null, updatedAt: date, rank: 0.9 },
+        { id: 's2', slug: 's2', title: 'S2', excerpt: null, updatedAt: date, rank: 0.1 },
+      ]) // seed query
+      .mockResolvedValueOnce([]); // tag hydration
+
+    // c1 linked from both seeds -> seedLinks = 2 -> boost = 0.3 * (2/2) = 0.3
+    mockLink.findMany
+      .mockResolvedValueOnce([
+        { fromId: 's1', toId: 'c1' },
+        { fromId: 's2', toId: 'c1' },
+      ]) // outLinks
+      .mockResolvedValueOnce([]); // inLinks
+    mockNote.findMany.mockResolvedValue([
+      { id: 'c1', slug: 'c1', title: 'C1', excerpt: null, updatedAt: date },
+    ]);
+
+    const out = await SearchService.getContext(userId, {
+      topic: 'hello',
+      limit: 10,
+      expand: true,
+      expandDepth: 1,
+    });
+
+    // scores: s1=1.0 (norm), c1=0.3 (graph), s2=0.0 (norm) -> c1 beats s2
+    expect(out.map((n) => n.id)).toEqual(['s1', 'c1', 's2']);
+    // shape is identical to the flat path (no score/seedLinks leak)
+    expect(out[1]).toEqual({
+      id: 'c1',
+      slug: 'c1',
+      title: 'C1',
+      excerpt: null,
+      tags: [],
+      updatedAt: date.toISOString(),
+    });
+  });
+
+  test('expand=true trims to limit after re-ranking', async () => {
+    const date = new Date('2026-01-05');
+    mockQueryRaw
+      .mockResolvedValueOnce([
+        { id: 's1', slug: 's1', title: 'S1', excerpt: null, updatedAt: date, rank: 0.9 },
+        { id: 's2', slug: 's2', title: 'S2', excerpt: null, updatedAt: date, rank: 0.1 },
+      ])
+      .mockResolvedValueOnce([]);
+    mockLink.findMany
+      .mockResolvedValueOnce([
+        { fromId: 's1', toId: 'c1' },
+        { fromId: 's2', toId: 'c1' },
+      ])
+      .mockResolvedValueOnce([]);
+    mockNote.findMany.mockResolvedValue([
+      { id: 'c1', slug: 'c1', title: 'C1', excerpt: null, updatedAt: date },
+    ]);
+
+    const out = await SearchService.getContext(userId, {
+      topic: 'hello',
+      limit: 2,
+      expand: true,
+    });
+
+    // s1 (1.0), c1 (0.3) kept; weak seed s2 (0.0) trimmed
+    expect(out.map((n) => n.id)).toEqual(['s1', 'c1']);
+  });
+
+  test('expand=true with no seed matches returns empty array without expanding', async () => {
+    mockQueryRaw.mockResolvedValueOnce([]); // no seeds
+    const out = await SearchService.getContext(userId, { topic: 'nope', expand: true });
+    expect(out).toEqual([]);
+    expect(mockLink.findMany).not.toHaveBeenCalled();
+  });
+});

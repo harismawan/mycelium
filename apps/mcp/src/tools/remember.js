@@ -14,7 +14,7 @@ import { logMcpAction } from "../activity-log.js";
  * @returns {(args: { title: string, content: string, tags?: string[], mode?: 'append'|'replace'|'new' }) => Promise<object>}
  */
 export function makeRememberHandler(auth, toolName) {
-  return async ({ title, content, tags, mode }) => {
+  return async ({ title, content, tags, mode, metadata }) => {
     const scopeError = checkScopes(["notes:write"], auth.scopes);
     if (scopeError) return scopeError;
 
@@ -25,6 +25,7 @@ export function makeRememberHandler(auth, toolName) {
         content,
         tags,
         mode,
+        metadata,
         authType: "apikey",
         apiKeyId: auth.apiKeyId,
         apiKeyName: auth.apiKeyName,
@@ -92,6 +93,13 @@ export function register(server, auth) {
       content: z.string(),
       tags: z.array(z.string()).optional(),
       mode: z.enum(["append", "replace", "new"]).optional(),
+      metadata: z
+        .object({
+          source: z.string().optional(),
+          confidence: z.number().min(0).max(1).optional(),
+          importance: z.number().int().min(1).max(5).optional(),
+        })
+        .optional(),
     },
     makeRememberHandler(auth, "remember"),
   );

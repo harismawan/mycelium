@@ -129,7 +129,7 @@ export const NoteService = {
    * @returns {Promise<{ id: string, slug: string, action: 'created'|'updated', excerpt: string }>}
    */
   async upsertMemory(userId, data) {
-    const { title, content, tags = [], mode = 'append', authType, apiKeyId, apiKeyName } = data;
+    const { title, content, tags = [], mode = 'append', metadata, authType, apiKeyId, apiKeyName } = data;
     const auth = { authType, apiKeyId, apiKeyName };
     const memoryTags = [...new Set([...tags, 'agent-memory'])];
     const memoriesDirectory = await DirectoryService.findOrCreateMemoriesDirectory(userId);
@@ -142,6 +142,7 @@ export const NoteService = {
         status: 'PUBLISHED',
         tags: memoryTags,
         directoryId: memoriesDirectory.id,
+        metadata,
         ...auth,
       });
       return { id: created.id, slug: created.slug, action: 'created', excerpt: created.excerpt };
@@ -168,6 +169,7 @@ export const NoteService = {
         status: 'PUBLISHED',
         tags: memoryTags,
         directoryId: memoriesDirectory.id,
+        metadata,
         ...auth,
       });
       return { id: created.id, slug: created.slug, action: 'created', excerpt: created.excerpt };
@@ -183,6 +185,7 @@ export const NoteService = {
     const { note } = await NoteService.updateNote(userId, existing.slug, {
       content: nextContent,
       tags: mergedTags,
+      metadata,
       ...auth,
     });
     return { id: note.id, slug: note.slug, action: 'updated', excerpt: note.excerpt };

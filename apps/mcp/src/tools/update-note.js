@@ -27,6 +27,13 @@ export function register(server, auth) {
       tags: z.array(z.string()).optional(),
       directoryId: z.string().nullable().optional(),
       message: z.string().optional(),
+      metadata: z
+        .object({
+          source: z.string().optional(),
+          confidence: z.number().min(0).max(1).optional(),
+          importance: z.number().int().min(1).max(5).optional(),
+        })
+        .optional(),
     },
     async ({
       slug,
@@ -36,6 +43,7 @@ export function register(server, auth) {
       tags,
       directoryId,
       message,
+      metadata,
     }) => {
       const scopeError = checkScopes(["notes:write"], auth.scopes);
       if (scopeError) return scopeError;
@@ -49,6 +57,7 @@ export function register(server, auth) {
           tags,
           directoryId,
           message,
+          metadata,
           authType: "apikey",
           apiKeyId: auth.apiKeyId,
           apiKeyName: auth.apiKeyName,

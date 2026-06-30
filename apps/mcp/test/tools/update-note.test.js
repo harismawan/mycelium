@@ -143,4 +143,17 @@ describe('update_note', () => {
     expect(parsed.error).toBe('Database error');
     expect(parsed.isRetryable).toBe(true);
   });
+
+  test('forwards metadata to NoteService.updateNote', async () => {
+    mockNoteService.updateNote.mockImplementation((userId, slug, data) => ({
+      note: {
+        id: 'n1', slug, title: 'My Note', content: 'body', status: 'DRAFT',
+        tags: [], directoryId: null, directory: null, metadata: data.metadata,
+      },
+    }));
+
+    await handler({ slug: 'my-note', metadata: { importance: 5 } });
+
+    expect(mockNoteService.updateNote.mock.calls[0][2].metadata).toEqual({ importance: 5 });
+  });
 });

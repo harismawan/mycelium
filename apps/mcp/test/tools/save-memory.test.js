@@ -113,4 +113,19 @@ describe('save_memory (thin alias for remember)', () => {
     const schema = server.getSchema('save_memory');
     expect(schema.mode).toBeUndefined();
   });
+
+  test('forwards metadata to NoteService.upsertMemory', async () => {
+    mockNoteService.upsertMemory.mockImplementation(() => ({
+      id: 'n6', slug: 'meta', action: 'created', excerpt: 'body',
+    }));
+
+    await handler({
+      title: 'Meta', content: 'body',
+      metadata: { source: 'web', confidence: 0.8, importance: 3 },
+    });
+
+    expect(mockNoteService.upsertMemory.mock.calls[0][1].metadata).toEqual({
+      source: 'web', confidence: 0.8, importance: 3,
+    });
+  });
 });

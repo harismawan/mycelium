@@ -134,4 +134,19 @@ describe('get_context', () => {
     expect(parsed.error).toBe('Database error');
     expect(parsed.isRetryable).toBe(true);
   });
+
+  test('passes metadata fields through from SearchService.getContext', async () => {
+    const now = new Date();
+    mockSearchService.getContext.mockImplementation(() => [
+      {
+        id: 'n1', slug: 'alpha', title: 'Alpha', excerpt: 'ex',
+        source: 'session:1', confidence: 0.9, importance: 4,
+        tags: ['t'], updatedAt: now.toISOString(),
+      },
+    ]);
+
+    const result = await handler({ topic: 'alpha', limit: 5 });
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed[0]).toMatchObject({ source: 'session:1', confidence: 0.9, importance: 4 });
+  });
 });

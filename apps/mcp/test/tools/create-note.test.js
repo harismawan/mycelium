@@ -138,4 +138,20 @@ describe('create_note', () => {
     expect(parsed.error).toBe('Database error');
     expect(parsed.isRetryable).toBe(true);
   });
+
+  test('forwards metadata to NoteService.createNote', async () => {
+    mockNoteService.createNote.mockImplementation((userId, data) => ({
+      id: 'n4', slug: 'meta-note', title: data.title, status: 'DRAFT',
+      tags: [], directoryId: null, directory: null,
+    }));
+
+    await handler({
+      title: 'Meta Note', content: 'body',
+      metadata: { source: 'doc', confidence: 0.5, importance: 2 },
+    });
+
+    expect(mockNoteService.createNote.mock.calls[0][1].metadata).toEqual({
+      source: 'doc', confidence: 0.5, importance: 2,
+    });
+  });
 });

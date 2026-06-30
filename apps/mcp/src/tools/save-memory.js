@@ -18,6 +18,13 @@ export function register(server, auth) {
       title: z.string().min(1, "title is required"),
       content: z.string(),
       tags: z.array(z.string()).optional(),
+      metadata: z
+        .object({
+          source: z.string().optional(),
+          confidence: z.number().min(0).max(1).optional(),
+          importance: z.number().int().min(1).max(5).optional(),
+        })
+        .optional(),
     },
     makeRememberHandler(auth, "save_memory"),
   );

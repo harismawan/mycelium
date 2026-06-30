@@ -24,8 +24,15 @@ export function register(server, auth) {
       status: z.enum(["DRAFT", "PUBLISHED", "ARCHIVED"]).optional(),
       tags: z.array(z.string()).optional(),
       directoryId: z.string().nullable().optional(),
+      metadata: z
+        .object({
+          source: z.string().optional(),
+          confidence: z.number().min(0).max(1).optional(),
+          importance: z.number().int().min(1).max(5).optional(),
+        })
+        .optional(),
     },
-    async ({ title, content, status, tags, directoryId }) => {
+    async ({ title, content, status, tags, directoryId, metadata }) => {
       const scopeError = checkScopes(["notes:write"], auth.scopes);
       if (scopeError) return scopeError;
 
@@ -37,6 +44,7 @@ export function register(server, auth) {
           status,
           tags,
           directoryId,
+          metadata,
           authType: "apikey",
           apiKeyId: auth.apiKeyId,
           apiKeyName: auth.apiKeyName,

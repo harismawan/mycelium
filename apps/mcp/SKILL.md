@@ -40,6 +40,27 @@ Use wikilinks for durable relationships: `[[Related Note Title]]`. The save pipe
 
 Use session context for temporary state only. Use `set_session_context` for connection-local scratch information and `save_memory` for durable facts that should survive future sessions.
 
+## Memory Loop
+
+Mycelium memory is a loop: recall before you write, consolidate so you do not duplicate, then write durable facts as notes. Run the loop every session.
+
+1. Recall first. At the start of a task, load prior knowledge with `get_context({ topic })`. Narrow with `search_notes({ query })` and open full notes with `read_note({ slug })`. Do not write a memory before checking whether it already exists.
+2. Search before saving. Before `save_memory`, run `search_notes({ query, tag: "agent-memory" })` for an existing note on the same fact. If one exists, update it with `update_note` (preserving structure, wikilinks, tags, and directory) instead of creating a near-duplicate.
+3. Write durable facts as notes. Use `save_memory({ title, content, tags })` for anything that should survive future sessions. It publishes the note, adds the `agent-memory` tag, and files it in the root `memories` directory.
+4. Connect what you save. Add `[[Related Note Title]]` wikilinks so the new memory joins the graph instead of becoming an island; the save pipeline extracts and reconciles them.
+5. Keep scratch out of memory. Use `set_session_context` only for transient per-task state, never for durable knowledge. See the limits below.
+
+### Session Context Lifecycle
+
+`set_session_context`, `get_session_context`, and `list_session_context` are backed by Redis and are unreliable scratch, not memory. Treat every value as disposable:
+
+- Sliding 24h TTL. Each key expires 24 hours after its last read or write, so untouched keys disappear.
+- Hard caps. Maximum 100 keys per store and 10KB (10,240 bytes) per value; writes past either limit are rejected.
+- Scoped to your Mycelium user account, not the connection. All keys live in a single keyspace per Mycelium user (the user that owns the API key), shared across every connection and every API key that authenticates as that user. They are not isolated per connection or per session, so concurrent sessions can read and overwrite each other's keys.
+- Wiped on disconnect. The store is destroyed when the connection closes: stdio shutdown (`SIGINT`, `SIGTERM`, or stdin end) or HTTP transport close, taking every key with it.
+
+Because of this, put any fact you want to keep into a note via `save_memory`. Use session context only for short-lived state within a single working session.
+
 ## Directory Workflow
 
 Directories are first-class organization. A note belongs to zero or one directory.

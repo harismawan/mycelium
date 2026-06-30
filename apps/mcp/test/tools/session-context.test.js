@@ -192,9 +192,10 @@ describe('session context tools', () => {
   });
 
   describe('scope enforcement', () => {
-    test('set_session_context requires agent:read scope', async () => {
+    test('set_session_context requires notes:write scope', async () => {
       const server = createMockServer();
-      registerSet(server, { userId: USER_ID, scopes: [] });
+      // agent:read alone (a read-only agent) is no longer enough to write scratch.
+      registerSet(server, { userId: USER_ID, apiKeyId: API_KEY_ID, scopes: ['agent:read'] });
       const noScopeHandler = server.getHandler('set_session_context');
 
       const result = await noScopeHandler({ key: 'k', value: 'v' });

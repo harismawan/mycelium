@@ -552,9 +552,13 @@ export const LinkService = {
       }
     }
 
-    return [...candidates.values()].map((note) => ({
+    const result = [...candidates.values()].map((note) => ({
       ...note,
       seedLinks: seedLinkMap.get(note.id)?.size ?? 0,
     }));
+    // Cap to MAX_GRAPH_NODES, keeping the most co-cited candidates first so
+    // that R9.2 ranking has the highest-value entries even when truncated.
+    result.sort((a, b) => b.seedLinks - a.seedLinks);
+    return result.slice(0, MAX_GRAPH_NODES);
   },
 };

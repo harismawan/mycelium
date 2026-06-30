@@ -640,4 +640,74 @@ describe('LinkService._expandNeighbors', () => {
 
     expect(mockLink.findMany).toHaveBeenCalledTimes(2); // out + in, one level only
   });
+
+  /** Validates: Requirements 9.1 — Set idempotency for duplicate links */
+  test('same seed linking a candidate twice counts that seed once', async () => {
+    // s1 -> c1 appears twice in the link table; seedLinks must be 1 (Set dedup)
+    mockLink.findMany
+      .mockResolvedValueOnce([
+        { fromId: 's1', toId: 'c1' },
+        { fromId: 's1', toId: 'c1' },
+      ]) // outLinks
+      .mockResolvedValueOnce([]); // inLinks
+
+    mockNote.findMany.mockResolvedValue([
+      { id: 'c1', slug: 'c1', title: 'C1', excerpt: null, updatedAt: new Date('2026-01-01') },
+    ]);
+
+    const out = await LinkService._expandNeighbors('user_1', ['s1'], 1);
+
+    expect(out).toHaveLength(1);
+    expect(out[0].seedLinks).toBe(1);
+  });
+
+  /** Validates: Requirements 9.1 — multi-hop BFS */
+  test('depth=2 traverses a second hop', async () => {
+    // s1 -> c1 (hop 1), c1 -> c2 (hop 2)
+    mockLink.findMany
+      .mockResolvedValueOnce([{ fromId: 's1', toId: 'c1' }]) // outLinks level 1
+      .mockResolvedValueOnce([])                               // inLinks  level 1
+      .mockResolvedValueOnce([{ fromId: 'c1', toId: 'c2' }]) // outLinks level 2
+      .mockResolvedValueOnce([]);                              // inLinks  level 2
+
+    mockNote.findMany
+      .mockResolvedValueOnce([
+        { id: 'c1', slug: 'c1', title: 'C1', excerpt: null, updatedAt: new Date('2026-01-01') },
+      ]) // neighbors found at hop 1
+      .mockResolvedValueOnce([
+        { id: 'c2', slug: 'c2', title: 'C2', excerpt: null, updatedAt: new Date('2026-01-02') },
+      ]); // neighbors found at hop 2
+
+    const out = await LinkService._expandNeighbors('user_1', ['s1'], 2);
+
+    const ids = out.map((n) => n.id);
+    expect(ids).toContain('c1');
+    expect(ids).toContain('c2');
+    expect(mockLink.findMany).toHaveBeenCalledTimes(4); // 2 levels × {out, in}
+  });
+
+  /** Validates: Requirements 9.1 — MAX_GRAPH_NODES cap */
+  test('caps returned candidates at MAX_GRAPH_NODES, highest seedLinks first', async () => {
+    const over = MAX_GRAPH_NODES + 1;
+    // Generate over candidates: c0..cN, all linked from s1
+    const outLinks = Array.from({ length: over }, (_, i) => ({ fromId: 's1', toId: `c${i}` }));
+    mockLink.findMany
+      .mockResolvedValueOnce(outLinks) // outLinks
+      .mockResolvedValueOnce([]);      // inLinks
+
+    const notes = Array.from({ length: over }, (_, i) => ({
+      id: `c${i}`,
+      slug: `c${i}`,
+      title: `C${i}`,
+      excerpt: null,
+      updatedAt: new Date('2026-01-01'),
+    }));
+    mockNote.findMany.mockResolvedValue(notes);
+
+    const out = await LinkService._expandNeighbors('user_1', ['s1'], 1);
+
+    expect(out.length).toBe(MAX_GRAPH_NODES);
+    // All returned items should have seedLinks >= those not returned (trivially 1 here)
+    expect(out.every((n) => n.seedLinks === 1)).toBe(true);
+  });
 });

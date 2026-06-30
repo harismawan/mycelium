@@ -49,6 +49,9 @@ export const NoteResponse = t.Object({
   content: t.String({ description: 'Markdown content body' }),
   frontmatter: t.Union([t.Object({}), t.Null()], { description: 'Parsed YAML frontmatter or null' }),
   excerpt: t.Union([t.String(), t.Null()], { description: 'Auto-generated excerpt or null' }),
+  source: t.Union([t.String(), t.Null()], { description: 'Provenance of the memory or null' }),
+  confidence: t.Union([t.Number(), t.Null()], { description: 'Agent-supplied confidence 0..1 or null' }),
+  importance: t.Union([t.Number(), t.Null()], { description: 'Agent-supplied importance 1..5 or null' }),
   status: t.Union([t.Literal('DRAFT'), t.Literal('PUBLISHED'), t.Literal('ARCHIVED')], {
     description: 'Publication status',
   }),

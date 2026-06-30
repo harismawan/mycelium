@@ -1,5 +1,5 @@
 import { describe, test, expect, mock, beforeEach } from 'bun:test';
-import { GRAPH_DECAY, MAX_GRAPH_NODES, MAX_GRAPH_DEPTH } from '@mycelium/shared';
+import { GRAPH_DECAY, MAX_GRAPH_NODES, MAX_GRAPH_DEPTH, MEMORY_DECAY_RATE } from '@mycelium/shared';
 
 // ---------------------------------------------------------------------------
 // Mock setup — must happen before any import that touches Prisma
@@ -1024,5 +1024,31 @@ describe('SearchService.getContext — write-on-read salience', () => {
 
     expect(result).toHaveLength(1);
     expect(result[0].id).toBe('n1');
+  });
+});
+
+// ===========================================================================
+// SearchService.getContext — decay-weighted topic recall (R14.4)
+// ===========================================================================
+describe('SearchService.getContext — decay-weighted topic recall', () => {
+  /** Validates: R14.4 — decay term on COALESCE(lastAccessedAt, createdAt) */
+  test('ORDER BY multiplies ts_rank by exp-decay on last-access recency', async () => {
+    // Empty results from the primary query trigger the fuzzy fallback (second call).
+    // We only assert the shape of the primary ranking query (calls[0]).
+    mockQueryRaw.mockResolvedValue([]);
+
+    await SearchService.getContext(userId, { topic: 'kubernetes', limit: 5 });
+
+    expect(mockQueryRaw).toHaveBeenCalledTimes(2); // primary + fuzzy fallback
+    const [strings, ...values] = mockQueryRaw.mock.calls[0];
+    const sql = strings.join('');
+    expect(sql).toContain('ts_rank(n."searchVector"');
+    expect(sql).toContain('exp(');
+    expect(sql).toContain('COALESCE(n."lastAccessedAt", n."createdAt")');
+    // negative rate is interpolated as a bound parameter
+    expect(values).toContain(-MEMORY_DECAY_RATE);
+    // recency, not updatedAt, is the tiebreak
+    expect(sql).toContain('ORDER BY');
+    expect(sql).not.toMatch(/ORDER BY[\s\S]*n\."updatedAt" DESC/);
   });
 });

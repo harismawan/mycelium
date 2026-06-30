@@ -37,7 +37,7 @@ export const SearchService = {
    */
   async search(userId, query, filters = {}) {
     const limit = filters.limit ?? DEFAULT_PAGE_LIMIT;
-    const tsQuery = Prisma.sql`plainto_tsquery('english', ${query})`;
+    const tsQuery = Prisma.sql`websearch_to_tsquery('english', ${query})`;
     const rankSql = Prisma.sql`ts_rank(n."searchVector", ${tsQuery})`;
 
     // Build dynamic WHERE clauses
@@ -123,7 +123,7 @@ export const SearchService = {
       }));
     }
 
-    const tsQuery = Prisma.sql`plainto_tsquery('english', ${opts.topic})`;
+    const tsQuery = Prisma.sql`websearch_to_tsquery('english', ${opts.topic})`;
     const results = await prisma.$queryRaw`
       SELECT n."id", n."slug", n."title", n."excerpt", n."updatedAt"
       FROM "Note" n

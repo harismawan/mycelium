@@ -252,7 +252,7 @@ describe('LinkService.getGraph — full graph', () => {
     expect(graph.nodes).toHaveLength(2);
     expect(graph.nodes[0]).toEqual({ id: 'n1', slug: 'alpha', title: 'Alpha', status: 'PUBLISHED' });
     expect(graph.edges).toHaveLength(1);
-    expect(graph.edges[0]).toEqual({ fromId: 'n1', toId: 'n2', relation: 'references' });
+    expect(graph.edges[0]).toEqual({ fromId: 'n1', toId: 'n2', relation: 'references', weight: 1 });
   });
 
   /** Validates: Requirements 7.3 */
@@ -375,7 +375,7 @@ describe('LinkService.getGraph — ego-subgraph', () => {
     expect(nodeIds).toContain('n1');
     expect(nodeIds).toContain('n2');
     expect(graph.edges).toHaveLength(1);
-    expect(graph.edges[0]).toEqual({ fromId: 'n1', toId: 'n2', relation: null });
+    expect(graph.edges[0]).toEqual({ fromId: 'n1', toId: 'n2', relation: null, weight: 1 });
   });
 
   test('returns empty graph when start note not found', async () => {

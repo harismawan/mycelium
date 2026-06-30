@@ -238,7 +238,7 @@ describe('LinkService.getBacklinks', () => {
 
     expect(mockLink.findMany).toHaveBeenCalledWith({
       where: { toId: 'note_target' },
-      select: { fromId: true },
+      select: { fromId: true, relation: true, weight: true },
     });
     expect(result).toHaveLength(2);
     expect(result[0].id).toBe('note_a');
@@ -372,5 +372,38 @@ describe('LinkService.autoLink', () => {
   test('is a no-op for empty target lists', async () => {
     await LinkService.autoLink('note_1', [], { relation: 'related-to', source: 'semantic' });
     expect(mockLink.createMany).not.toHaveBeenCalled();
+  });
+});
+
+describe('LinkService.getOutgoingLinks — relation/weight', () => {
+  test('surfaces relation and weight on resolved and unresolved edges', async () => {
+    mockLink.findMany.mockResolvedValue([
+      { toId: 'n2', toTitle: null, relation: 'supports', weight: 2 },
+      { toId: null, toTitle: 'Ghost', relation: 'refines', weight: 1 },
+    ]);
+    mockNote.findMany.mockResolvedValue([{ id: 'n2', slug: 'beta', title: 'Beta' }]);
+
+    const result = await LinkService.getOutgoingLinks('n1');
+
+    expect(result.resolved).toEqual([
+      { id: 'n2', slug: 'beta', title: 'Beta', relation: 'supports', weight: 2 },
+    ]);
+    expect(result.unresolved).toEqual([
+      { title: 'Ghost', relation: 'refines', weight: 1 },
+    ]);
+  });
+});
+
+describe('LinkService.getBacklinks — relation/weight', () => {
+  test('attaches the linking edge relation and weight to each source note', async () => {
+    mockLink.findMany.mockResolvedValue([{ fromId: 'note_a', relation: 'derived-from', weight: 4 }]);
+    mockNote.findMany.mockResolvedValue([
+      { id: 'note_a', title: 'Note A', slug: 'note-a', tags: [] },
+    ]);
+
+    const result = await LinkService.getBacklinks('note_target');
+
+    expect(result[0].relation).toBe('derived-from');
+    expect(result[0].weight).toBe(4);
   });
 });

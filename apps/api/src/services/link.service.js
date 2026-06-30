@@ -215,7 +215,7 @@ export const LinkService = {
   async getBacklinks(noteId) {
     const links = await prisma.link.findMany({
       where: { toId: noteId },
-      select: { fromId: true },
+      select: { fromId: true, relation: true, weight: true },
     });
 
     if (!links.length) return [];
@@ -229,7 +229,12 @@ export const LinkService = {
       take: MAX_LINK_RESULTS,
     });
 
-    return notes;
+    // Attach the linking edge's relation/weight to each source note.
+    const edgeByFrom = new Map(links.map((l) => [l.fromId, l]));
+    return notes.map((note) => {
+      const edge = edgeByFrom.get(note.id);
+      return { ...note, relation: edge?.relation ?? null, weight: edge?.weight ?? 1 };
+    });
   },
 
   /**
@@ -241,13 +246,13 @@ export const LinkService = {
   async getOutgoingLinks(noteId) {
     const links = await prisma.link.findMany({
       where: { fromId: noteId },
-      select: { toId: true, toTitle: true },
+      select: { toId: true, toTitle: true, relation: true, weight: true },
     });
 
     const resolvedLinks = links.filter((link) => link.toId !== null);
     const unresolved = links
       .filter((link) => link.toId === null && link.toTitle)
-      .map((link) => ({ title: link.toTitle }))
+      .map((link) => ({ title: link.toTitle, relation: link.relation ?? null, weight: link.weight ?? 1 }))
       .slice(0, MAX_LINK_RESULTS);
 
     if (!resolvedLinks.length) {
@@ -261,15 +266,22 @@ export const LinkService = {
       orderBy: { updatedAt: 'desc' },
       take: MAX_LINK_RESULTS,
     });
+    const byId = new Map(targetNotes.map((n) => [n.id, n]));
 
-    return {
-      resolved: targetNotes.map((note) => ({
+    const resolved = [];
+    for (const link of resolvedLinks) {
+      const note = byId.get(link.toId);
+      if (!note) continue;
+      resolved.push({
         id: note.id,
         slug: note.slug,
         title: note.title,
-      })),
-      unresolved,
-    };
+        relation: link.relation ?? null,
+        weight: link.weight ?? 1,
+      });
+    }
+
+    return { resolved, unresolved };
   },
 
   /**
@@ -345,14 +357,14 @@ export const LinkService = {
         fromId: { in: [...noteIds] },
         toId: { not: null },
       },
-      select: { fromId: true, toId: true, relation: true },
+      select: { fromId: true, toId: true, relation: true, weight: true },
     });
 
     // Only include edges where both endpoints are in the (possibly capped) node set,
     // which also trims edges dangling to nodes dropped by the cap.
     const edges = links
       .filter((l) => noteIds.has(l.toId))
-      .map((l) => ({ fromId: l.fromId, toId: l.toId, relation: l.relation ?? null }));
+      .map((l) => ({ fromId: l.fromId, toId: l.toId, relation: l.relation ?? null, weight: l.weight ?? 1 }));
 
     return { nodes: notes, edges, truncated };
   },
@@ -392,21 +404,26 @@ export const LinkService = {
       const [outLinks, inLinks] = await Promise.all([
         prisma.link.findMany({
           where: { fromId: { in: frontier }, toId: { not: null } },
-          select: { fromId: true, toId: true, relation: true },
+          select: { fromId: true, toId: true, relation: true, weight: true },
         }),
         prisma.link.findMany({
           where: { toId: { in: frontier }, fromId: { not: undefined } },
-          select: { fromId: true, toId: true, relation: true },
+          select: { fromId: true, toId: true, relation: true, weight: true },
         }),
       ]);
 
       const neighborIds = new Set();
 
       for (const link of [...outLinks, ...inLinks]) {
-        const edgeKey = `${link.fromId}->${link.toId}`;
+        const edgeKey = `${link.fromId}->${link.toId}::${link.relation ?? ''}`;
         if (!edgeSet.has(edgeKey)) {
           edgeSet.add(edgeKey);
-          edges.push({ fromId: link.fromId, toId: link.toId, relation: link.relation ?? null });
+          edges.push({
+            fromId: link.fromId,
+            toId: link.toId,
+            relation: link.relation ?? null,
+            weight: link.weight ?? 1,
+          });
         }
 
         if (!visited.has(link.toId)) neighborIds.add(link.toId);

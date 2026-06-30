@@ -121,21 +121,36 @@ describe('save_memory', () => {
     expect(tagNames.length).toBe(2);
   });
 
-  test('returns only id and slug', async () => {
+  test('echoes the full persisted shape', async () => {
     mockDirectoryService.findOrCreateMemoriesDirectory.mockImplementation(() => ({ id: 'memories-dir' }));
     mockNoteService.createNote.mockImplementation(() => ({
       id: 'n4',
       slug: 'shape-check',
       title: 'Shape Check',
       status: 'PUBLISHED',
-      tags: [{ name: 'agent-memory' }],
+      directoryId: 'memories-dir',
+      excerpt: 'A sanitized excerpt',
+      tags: [{ name: 'agent-memory' }, { name: 'research' }],
     }));
 
     const result = await handler({ title: 'Shape Check', content: 'body' });
     const parsed = JSON.parse(result.content[0].text);
-    expect(Object.keys(parsed).sort()).toEqual(['id', 'slug']);
+    expect(Object.keys(parsed).sort()).toEqual([
+      'directoryId',
+      'excerpt',
+      'id',
+      'slug',
+      'status',
+      'tags',
+      'title',
+    ]);
     expect(parsed.id).toBe('n4');
     expect(parsed.slug).toBe('shape-check');
+    expect(parsed.title).toBe('Shape Check');
+    expect(parsed.status).toBe('PUBLISHED');
+    expect(parsed.directoryId).toBe('memories-dir');
+    expect(parsed.excerpt).toBe('A sanitized excerpt');
+    expect(parsed.tags).toEqual(['agent-memory', 'research']);
   });
 
   test('rejects without notes:write scope', async () => {

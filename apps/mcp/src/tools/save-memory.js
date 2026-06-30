@@ -46,6 +46,11 @@ export function register(server, auth) {
         const result = {
           id: note.id,
           slug: note.slug,
+          title: note.title,
+          status: note.status,
+          directoryId: note.directoryId,
+          excerpt: note.excerpt,
+          tags: note.tags.map((t) => t.name),
         };
 
         await logMcpAction(auth, {

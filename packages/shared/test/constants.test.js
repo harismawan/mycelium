@@ -4,6 +4,9 @@ import {
   MAX_GRAPH_DEPTH,
   MAX_LINK_RESULTS,
   GRAPH_DECAY,
+  MEMORY_DECAY_RATE,
+  FORGET_STALE_DEFAULT_DAYS,
+  FORGET_MIN_IMPORTANCE,
 } from '../constants.js';
 import * as barrel from '../index.js';
 
@@ -57,5 +60,24 @@ describe('GRAPH_DECAY', () => {
 
   test('is re-exported from the package barrel', () => {
     expect(barrel.GRAPH_DECAY).toBe(GRAPH_DECAY);
+  });
+});
+
+describe('memory salience constants', () => {
+  test('MEMORY_DECAY_RATE is a small positive per-day rate', () => {
+    expect(typeof MEMORY_DECAY_RATE).toBe('number');
+    expect(MEMORY_DECAY_RATE).toBeGreaterThan(0);
+    expect(MEMORY_DECAY_RATE).toBeLessThan(1);
+  });
+
+  test('FORGET_STALE_DEFAULT_DAYS is a positive integer', () => {
+    expect(Number.isInteger(FORGET_STALE_DEFAULT_DAYS)).toBe(true);
+    expect(FORGET_STALE_DEFAULT_DAYS).toBeGreaterThan(0);
+  });
+
+  test('FORGET_MIN_IMPORTANCE sits in the 1..5 importance band', () => {
+    expect(Number.isInteger(FORGET_MIN_IMPORTANCE)).toBe(true);
+    expect(FORGET_MIN_IMPORTANCE).toBeGreaterThanOrEqual(1);
+    expect(FORGET_MIN_IMPORTANCE).toBeLessThanOrEqual(5);
   });
 });

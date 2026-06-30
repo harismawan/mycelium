@@ -121,3 +121,31 @@ export const EMBEDDING_DIMENSIONS = 1024;
  * @type {number}
  */
 export const RRF_K = 60;
+
+/**
+ * Per-day exponential decay rate applied to a memory's recency when ranking
+ * topic recall in `SearchService.getContext`. Larger = forgets faster.
+ * 0.02/day ≈ a ~35-day half-life. Treat as tunable.
+ *
+ * @type {number}
+ */
+export const MEMORY_DECAY_RATE = 0.02;
+
+/**
+ * Default age, in days, past which a low-salience agent memory becomes
+ * eligible for auto-archival by `NoteService.forgetStale`. Age is measured
+ * from `COALESCE(lastAccessedAt, createdAt)`, never `updatedAt`.
+ *
+ * @type {number}
+ */
+export const FORGET_STALE_DEFAULT_DAYS = 90;
+
+/**
+ * Notes whose `importance` (R8, 1–5) is >= this threshold are never
+ * auto-archived. When `importance` is null/absent, `pinned` is the fallback
+ * keep-signal. COALESCE treats null importance as 0, so unscored memories
+ * remain eligible.
+ *
+ * @type {number}
+ */
+export const FORGET_MIN_IMPORTANCE = 3;

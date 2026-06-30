@@ -40,6 +40,9 @@ model Note {
   content     String
   frontmatter Json?
   excerpt     String?
+  source      String?
+  confidence  Float?
+  importance  Int?
   status      NoteStatus @default(DRAFT)
   pinned      Boolean    @default(false)
   searchVector Unsupported("tsvector")? @default(dbgenerated())

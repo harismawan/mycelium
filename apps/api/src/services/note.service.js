@@ -124,8 +124,10 @@ export const NoteService = {
       return created;
     };
 
-    // Batch path injects a tx: run inline so all items commit atomically.
-    // Auto-linking is deferred to the batch caller in this case.
+    // Batch path injects a tx: run inline so all items commit in the caller's transaction.
+    // Auto-linking AND embedding are skipped on this path — createMemories does neither.
+    // Embeddings for batch-created notes are written only on a later standalone update
+    // or by running scripts/backfill-embeddings.js (covers rows where embedding IS NULL).
     if (opts.tx) {
       return runWrite(opts.tx);
     }
@@ -228,12 +230,17 @@ export const NoteService = {
   },
 
   /**
-   * Batch-create memory notes in a single transaction, best-effort per item.
+   * Batch-create memory notes, best-effort per item.
    *
    * Each item runs through `upsertMemory` (or `createNote` when upsertMemory is
-   * absent), sharing one transaction and one in-flight slug-reservation set so a
-   * session-end flush of N findings is one DB round trip. A single failing item
-   * is captured in its result `error` and does not abort the survivors.
+   * absent), sharing one slug-reservation set so a session-end flush of N
+   * findings is one DB round trip. A single failing item is captured in its
+   * result `error` and does not abort the survivors.
+   *
+   * Atomicity caveat: the CREATE (mode 'new') path runs inside the single batch
+   * transaction. The append/replace (consolidate) path delegates to `updateNote`,
+   * which opens its OWN transaction and does not accept an injected tx — so the
+   * batch is NOT fully atomic across consolidate items; it is best-effort per item.
    *
    * @param {string} userId - ID of the owning user.
    * @param {Array<{ title: string, content: string, status?: string, tags?: string[], directoryId?: string | null, mode?: string, authType?: string, apiKeyId?: string, apiKeyName?: string }>} memories

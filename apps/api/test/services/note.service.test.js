@@ -1025,6 +1025,11 @@ describe('NoteService.forgetStale', () => {
     expect(sql).toContain('"pinned" = false');
     expect(sql).toContain('COALESCE(n."importance", 0)');
     expect(sql).toContain('COALESCE(n."lastAccessedAt", n."createdAt")');
+    // DATA SAFETY: must restrict to agent-memory tagged notes only
+    expect(sql).toContain('"_NoteToTag"');
+    // bound params are spread args after the strings array
+    const boundValues = mockQueryRaw.mock.calls[0].slice(1);
+    expect(boundValues).toContain('agent-memory');
   });
 
   test('defaults to FORGET_STALE_DEFAULT_DAYS when olderThanDays omitted', async () => {

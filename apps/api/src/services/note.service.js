@@ -594,12 +594,21 @@ export const NoteService = {
         AND n."pinned" = false
         AND COALESCE(n."importance", 0) < ${FORGET_MIN_IMPORTANCE}
         AND COALESCE(n."lastAccessedAt", n."createdAt") < ${cutoff}
+        AND EXISTS (
+          SELECT 1 FROM "_NoteToTag" nt
+          INNER JOIN "Tag" t ON t."id" = nt."B"
+          WHERE nt."A" = n."id" AND t."name" = ${'agent-memory'}
+        )
     `;
 
     let archived = 0;
     for (const { slug } of candidates) {
-      await this.archiveNote(userId, slug);
-      archived += 1;
+      try {
+        await this.archiveNote(userId, slug);
+        archived += 1;
+      } catch {
+        // Best-effort: a single failure does not abort the sweep.
+      }
     }
 
     return { archived };

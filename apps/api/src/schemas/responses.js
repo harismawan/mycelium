@@ -169,6 +169,12 @@ export const GraphResponse = t.Object({
       slug: t.String(),
       title: t.String(),
       status: t.String(),
+      hop: t.Optional(
+        t.Number({ description: 'BFS hop distance from the ego center (ego-subgraph reads only)' }),
+      ),
+      score: t.Optional(
+        t.Number({ description: 'Distance-decayed relevance score (ego-subgraph reads only)' }),
+      ),
     }),
     { description: 'Graph nodes representing notes' },
   ),
@@ -178,6 +184,9 @@ export const GraphResponse = t.Object({
       toId: t.Union([t.String(), t.Null()]),
       relation: t.Union([t.String(), t.Null()]),
       weight: t.Number({ description: 'Edge weight (wikilink occurrence count)' }),
+      createdAt: t.Optional(
+        t.Date({ description: 'Edge creation timestamp for temporal ordering' }),
+      ),
     }),
     { description: 'Graph edges representing links between notes' },
   ),

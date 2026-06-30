@@ -26,7 +26,7 @@ export function register(server, auth) {
 
       const start = performance.now();
       try {
-        const value = await getSessionValue(auth.userId, key);
+        const value = await getSessionValue(auth.apiKeyId, key);
 
         await logMcpAction(auth, {
           action: "mcp:get_session_context",

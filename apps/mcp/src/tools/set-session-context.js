@@ -27,7 +27,7 @@ export function register(server, auth) {
 
       const start = performance.now();
       try {
-        const limitError = await setSessionValue(auth.userId, key, value);
+        const limitError = await setSessionValue(auth.apiKeyId, key, value);
         if (limitError) {
           await logMcpAction(auth, {
             action: "mcp:set_session_context",

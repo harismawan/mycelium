@@ -7,19 +7,27 @@ import { prisma } from '../db.js';
 const TRIGRAM_SIMILARITY_THRESHOLD = 0.3;
 
 function encodeCursor(note) {
-  return Buffer.from(JSON.stringify({ rank: Number(note.rank), id: note.id })).toString('base64url');
+  const updatedAt =
+    note.updatedAt instanceof Date ? note.updatedAt.toISOString() : note.updatedAt ?? null;
+  return Buffer.from(
+    JSON.stringify({ rank: Number(note.rank), updatedAt, id: note.id }),
+  ).toString('base64url');
 }
 
 function decodeCursor(cursor) {
   try {
     const parsed = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'));
     if (typeof parsed?.id === 'string' && Number.isFinite(Number(parsed.rank))) {
-      return { id: parsed.id, rank: Number(parsed.rank) };
+      return {
+        id: parsed.id,
+        rank: Number(parsed.rank),
+        updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : null,
+      };
     }
   } catch {
-    // Fall back below for cursors produced before compound search pagination.
+    // Fall back below for cursors produced before recency-aware pagination.
   }
-  return { id: cursor, rank: null };
+  return { id: cursor, rank: null, updatedAt: null };
 }
 
 /**
@@ -57,14 +65,29 @@ export const SearchService = {
       conditions.push(Prisma.sql`n."status" != 'ARCHIVED'`);
     }
 
-    // Cursor-based pagination
+    // Cursor-based pagination. The keyset MUST mirror the ORDER BY tuple
+    // (rank DESC, updatedAt DESC, id DESC) or pagination skips/duplicates rows.
     if (filters.cursor) {
       const cursor = decodeCursor(filters.cursor);
-      conditions.push(
-        cursor.rank === null
-          ? Prisma.sql`n."id" < ${cursor.id}`
-          : Prisma.sql`(${rankSql} < ${cursor.rank} OR (${rankSql} = ${cursor.rank} AND n."id" < ${cursor.id}))`,
-      );
+      if (cursor.rank === null) {
+        // Legacy id-only cursor (pre-compound pagination).
+        conditions.push(Prisma.sql`n."id" < ${cursor.id}`);
+      } else if (cursor.updatedAt === null) {
+        // Transitional cursor issued before the recency tiebreak shipped:
+        // fall back to the 2-key (rank, id) keyset.
+        conditions.push(
+          Prisma.sql`(${rankSql} < ${cursor.rank} OR (${rankSql} = ${cursor.rank} AND n."id" < ${cursor.id}))`,
+        );
+      } else {
+        const cursorUpdatedAt = new Date(cursor.updatedAt);
+        conditions.push(
+          Prisma.sql`(
+            ${rankSql} < ${cursor.rank}
+            OR (${rankSql} = ${cursor.rank} AND n."updatedAt" < ${cursorUpdatedAt})
+            OR (${rankSql} = ${cursor.rank} AND n."updatedAt" = ${cursorUpdatedAt} AND n."id" < ${cursor.id})
+          )`,
+        );
+      }
     }
 
     const whereClause = Prisma.sql`WHERE ${Prisma.join(conditions, ' AND ')}`;
@@ -78,21 +101,26 @@ export const SearchService = {
     }
 
     const results = await prisma.$queryRaw`
-      SELECT n."id", n."slug", n."title", n."excerpt", n."status",
+      SELECT n."id", n."slug", n."title", n."excerpt", n."status", n."updatedAt",
              ${rankSql} AS rank
       FROM "Note" n
       ${joinClause}
       ${whereClause}
-      ORDER BY rank DESC, n."id" DESC
+      ORDER BY rank DESC, n."updatedAt" DESC, n."id" DESC
       LIMIT ${limit + 1}
     `;
 
     const hasMore = results.length > limit;
     if (hasMore) results.pop();
 
+    // Encode the cursor from the full row (needs updatedAt) BEFORE stripping it.
+    const nextCursor = hasMore ? encodeCursor(results[results.length - 1]) : null;
+
+    // updatedAt is selected only to drive ordering + the keyset cursor; strip it
+    // so the public SearchResponse shape (id/slug/title/excerpt/status/rank) is unchanged.
     return {
-      notes: results,
-      nextCursor: hasMore ? encodeCursor(results[results.length - 1]) : null,
+      notes: results.map(({ updatedAt, ...note }) => note),
+      nextCursor,
     };
   },
 

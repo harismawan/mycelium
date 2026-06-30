@@ -92,7 +92,7 @@ describe('SearchService.search', () => {
     expect(mockQueryRaw).toHaveBeenCalledTimes(1);
   });
 
-  /** Validates: Requirements 6.4 */
+  /** Validates: Requirements 6.4 + R4 (3-key cursor) */
   test('cursor-based pagination — hasMore true', async () => {
     // Return limit+1 items to signal more results
     const results = Array.from({ length: 4 }, (_, i) => ({
@@ -101,6 +101,7 @@ describe('SearchService.search', () => {
       title: `Note ${i}`,
       excerpt: null,
       status: 'DRAFT',
+      updatedAt: `2026-06-0${i + 1}T00:00:00.000Z`,
       rank: 1 - i * 0.1,
     }));
     mockQueryRaw.mockResolvedValue(results);
@@ -108,7 +109,12 @@ describe('SearchService.search', () => {
     const out = await SearchService.search(userId, 'test', { limit: 3 });
 
     expect(out.notes).toHaveLength(3);
-    expect(decodeCursor(out.nextCursor)).toEqual({ rank: 0.8, id: 'n2' });
+    expect(out.notes[0]).not.toHaveProperty('updatedAt');
+    expect(decodeCursor(out.nextCursor)).toEqual({
+      rank: 0.8,
+      updatedAt: '2026-06-03T00:00:00.000Z',
+      id: 'n2',
+    });
   });
 
   /** Validates: Requirements 6.4 */
@@ -139,14 +145,46 @@ describe('SearchService.search', () => {
   test('uses DEFAULT_PAGE_LIMIT when no limit provided', async () => {
     // Return 21 items (DEFAULT_PAGE_LIMIT + 1) to trigger hasMore
     const results = Array.from({ length: 21 }, (_, i) => ({
-      id: `n${i}`, slug: `s${i}`, title: `T${i}`, excerpt: null, status: 'DRAFT', rank: 1,
+      id: `n${i}`, slug: `s${i}`, title: `T${i}`, excerpt: null, status: 'DRAFT',
+      updatedAt: '2026-06-29T00:00:00.000Z', rank: 1,
     }));
     mockQueryRaw.mockResolvedValue(results);
 
     const out = await SearchService.search(userId, 'test');
 
     expect(out.notes).toHaveLength(20);
-    expect(decodeCursor(out.nextCursor)).toEqual({ rank: 1, id: 'n19' });
+    expect(decodeCursor(out.nextCursor)).toEqual({
+      rank: 1, updatedAt: '2026-06-29T00:00:00.000Z', id: 'n19',
+    });
+  });
+
+  /** Validates: R4 — keyset carries {rank, updatedAt, id}; no skips/dupes across tied ranks */
+  test('pagination keyset carries {rank, updatedAt, id} across tied ranks', async () => {
+    const t0 = '2026-06-01T00:00:00.000Z';
+    const t1 = '2026-06-02T00:00:00.000Z';
+    // limit 2, 3 rows -> hasMore. n0/n1 tie on rank 0.5 but differ on updatedAt,
+    // so the tiebreak (updatedAt DESC) decides their order and the cursor boundary.
+    const page1 = [
+      { id: 'n0', slug: 'a', title: 'A', excerpt: null, status: 'DRAFT', updatedAt: t1, rank: 0.5 },
+      { id: 'n1', slug: 'b', title: 'B', excerpt: null, status: 'DRAFT', updatedAt: t0, rank: 0.5 },
+      { id: 'n2', slug: 'c', title: 'C', excerpt: null, status: 'DRAFT', updatedAt: t0, rank: 0.4 },
+    ];
+    mockQueryRaw.mockResolvedValueOnce(page1).mockResolvedValueOnce([page1[2]]);
+
+    const out1 = await SearchService.search(userId, 'tie', { limit: 2 });
+    expect(out1.notes).toHaveLength(2);
+    // public shape must not leak the ordering-only updatedAt column
+    expect(out1.notes[0]).not.toHaveProperty('updatedAt');
+    // cursor points at the last returned row (n1) and carries all three keys
+    expect(decodeCursor(out1.nextCursor)).toEqual({ rank: 0.5, updatedAt: t0, id: 'n1' });
+
+    // page 2: feed the cursor back; the keyset WHERE must reference rank + updatedAt + id
+    const out2 = await SearchService.search(userId, 'tie', { limit: 2, cursor: out1.nextCursor });
+    const page2Call = JSON.stringify(mockQueryRaw.mock.calls[1]);
+    expect(page2Call).toContain('0.5'); // rank from cursor
+    expect(page2Call).toContain(t0);    // updatedAt from cursor (Date -> ISO when serialized)
+    expect(page2Call).toContain('n1');  // id from cursor
+    expect(out2.notes[0].id).toBe('n2');
   });
 });
 

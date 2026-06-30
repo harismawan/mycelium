@@ -213,11 +213,15 @@ describe('NoteService.createNote', () => {
     expect(resolved).toBeDefined();
     expect(resolved.fromId).toBe('note_new');
     expect(resolved.toTitle).toBeNull();
+    expect(resolved.relation).toBeNull();
+    expect(resolved.weight).toBe(1);
+    expect(resolved.source).toBe('wikilink');
 
     const unresolved = data.find((l) => l.toTitle === 'Missing Note');
     expect(unresolved).toBeDefined();
     expect(unresolved.fromId).toBe('note_new');
     expect(unresolved.toId).toBeNull();
+    expect(unresolved.source).toBe('wikilink');
   });
 
   /** Validates: Requirements 2.4 */

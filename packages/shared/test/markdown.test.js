@@ -93,17 +93,22 @@ describe('parseFrontmatter / serializeFrontmatter round-trip', () => {
 // ---------------------------------------------------------------------------
 describe('extractWikilinks', () => {
   test('finds single [[Link]]', () => {
-    expect(extractWikilinks('See [[My Note]] for details.')).toEqual(['My Note']);
+    expect(extractWikilinks('See [[My Note]] for details.')).toEqual([
+      { title: 'My Note', relation: null, count: 1 },
+    ]);
   });
 
   test('finds [[Multiple Words]] links', () => {
     const md = 'Check [[First Note]] and [[Second Note]] out.';
-    expect(extractWikilinks(md)).toEqual(['First Note', 'Second Note']);
+    expect(extractWikilinks(md)).toEqual([
+      { title: 'First Note', relation: null, count: 1 },
+      { title: 'Second Note', relation: null, count: 1 },
+    ]);
   });
 
-  test('deduplicates repeated links', () => {
+  test('counts repeated links instead of dropping them', () => {
     const md = '[[Dup]] is mentioned twice: [[Dup]].';
-    expect(extractWikilinks(md)).toEqual(['Dup']);
+    expect(extractWikilinks(md)).toEqual([{ title: 'Dup', relation: null, count: 2 }]);
   });
 
   test('returns empty array for content without wikilinks', () => {
@@ -115,11 +120,36 @@ describe('extractWikilinks', () => {
   });
 
   test('handles nested/adjacent brackets gracefully', () => {
-    // The regex [^\]]+ won't match inner ]], so nested brackets won't form a valid wikilink
     const md = 'Some [regular link](url) and [[Valid Link]] text.';
     const links = extractWikilinks(md);
-    expect(links).toContain('Valid Link');
     expect(links).toHaveLength(1);
+    expect(links[0]).toEqual({ title: 'Valid Link', relation: null, count: 1 });
+  });
+
+  test('parses a typed relation prefix from the canonical vocab', () => {
+    expect(extractWikilinks('Backed by [[supports: Atomic Habits]].')).toEqual([
+      { title: 'Atomic Habits', relation: 'supports', count: 1 },
+    ]);
+  });
+
+  test('preserves a colon when the prefix is NOT in the vocab', () => {
+    expect(extractWikilinks('See [[Chapter 1: Intro]].')).toEqual([
+      { title: 'Chapter 1: Intro', relation: null, count: 1 },
+    ]);
+  });
+
+  test('splits only on the first colon for typed links', () => {
+    expect(extractWikilinks('From [[derived-from: Chapter 1: Intro]].')).toEqual([
+      { title: 'Chapter 1: Intro', relation: 'derived-from', count: 1 },
+    ]);
+  });
+
+  test('treats same title with different relations as distinct edges', () => {
+    const md = '[[Note]] and also [[supports: Note]].';
+    expect(extractWikilinks(md)).toEqual([
+      { title: 'Note', relation: null, count: 1 },
+      { title: 'Note', relation: 'supports', count: 1 },
+    ]);
   });
 });
 

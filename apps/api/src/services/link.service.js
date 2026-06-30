@@ -26,17 +26,20 @@ function clampDepth(depth) {
  */
 export const LinkService = {
   /**
-   * Reconcile the Link table for a note after content changes.
+   * Reconcile wikilink-sourced edges for a note after content changes.
    *
-   * Diffs the current wikilinks in the content against existing Link records:
-   * - Creates new Link records for newly added wikilinks
-   * - Removes Link records for wikilinks no longer present
+   * Keys the diff on `relation::title`:
+   * - CREATE edges for typed wikilinks with no existing match
+   * - UPDATE `weight` when an existing edge's occurrence count drifts
+   * - DELETE wikilink edges no longer present in content
    *
-   * Uses a single batch query to look up all target notes, then createMany
-   * to insert them — avoiding N+1 queries in the creation loop.
+   * Find/delete are scoped to `source='wikilink'` so derived edges (e.g.
+   * `source='semantic'` from auto-link) are never clobbered. `weight` is the
+   * occurrence count of each `relation::title` pair.
    *
    * @param {string} noteId - The source note ID.
-   * @param {string[]} wikilinks - Deduplicated wikilink titles extracted from content.
+   * @param {Array<{ title: string, relation: string|null, count: number }>} wikilinks
+   *   Typed wikilinks extracted from content (see `extractWikilinks`).
    * @param {{ tx?: import('@prisma/client').Prisma.TransactionClient, userId?: string }} [opts]
    * @returns {Promise<void>}
    *
@@ -47,7 +50,6 @@ export const LinkService = {
     let { userId } = opts;
 
     if (!userId) {
-      // Fetch the source note to scope target lookups to the same user
       const sourceNote = await db.note.findUnique({
         where: { id: noteId },
         select: { userId: true },
@@ -56,16 +58,14 @@ export const LinkService = {
       userId = sourceNote.userId;
     }
 
-    // Get existing outgoing links for this note
+    // Only wikilink-sourced edges participate in reconciliation.
     const existingLinks = await db.link.findMany({
-      where: { fromId: noteId },
-      select: { id: true, toTitle: true, toId: true },
+      where: { fromId: noteId, source: 'wikilink' },
+      select: { id: true, toTitle: true, toId: true, relation: true, weight: true },
     });
 
-    // Resolve existing links that have toId to get their titles
-    const resolvedIds = existingLinks
-      .filter((l) => l.toId)
-      .map((l) => l.toId);
+    // Resolve titles for edges that already point at a real note.
+    const resolvedIds = existingLinks.filter((l) => l.toId).map((l) => l.toId);
     const resolvedNotes = resolvedIds.length
       ? await db.note.findMany({
           where: { id: { in: resolvedIds } },
@@ -74,45 +74,65 @@ export const LinkService = {
       : [];
     const idToTitle = new Map(resolvedNotes.map((n) => [n.id, n.title]));
 
-    // Build full set of existing link target titles
-    const existingTargetTitles = new Set();
+    const keyOf = (relation, title) => `${relation ?? ''}::${title}`;
+
+    /** @type {Map<string, { id: string, weight: number }>} */
+    const existingByKey = new Map();
     for (const link of existingLinks) {
-      if (link.toTitle) {
-        existingTargetTitles.add(link.toTitle);
-      } else if (link.toId) {
-        const t = idToTitle.get(link.toId);
-        if (t) existingTargetTitles.add(t);
+      const title = link.toTitle ?? idToTitle.get(link.toId);
+      if (!title) continue;
+      existingByKey.set(keyOf(link.relation, title), { id: link.id, weight: link.weight });
+    }
+
+    /** @type {Map<string, { title: string, relation: string|null, count: number }>} */
+    const incomingByKey = new Map();
+    for (const wl of wikilinks) {
+      incomingByKey.set(keyOf(wl.relation, wl.title), wl);
+    }
+
+    // UPDATE pass: existing edges whose weight drifted from the new count.
+    for (const [key, wl] of incomingByKey) {
+      const existing = existingByKey.get(key);
+      if (existing && existing.weight !== wl.count) {
+        await db.link.update({
+          where: { id: existing.id },
+          data: { weight: wl.count },
+        });
       }
     }
 
-    // Determine new and removed wikilinks
-    const currentSet = new Set(wikilinks);
-    const toCreate = wikilinks.filter((t) => !existingTargetTitles.has(t));
+    // DELETE pass: wikilink edges absent from the new content.
     const toRemove = existingLinks.filter((link) => {
       const title = link.toTitle ?? idToTitle.get(link.toId);
-      return title && !currentSet.has(title);
+      return title && !incomingByKey.has(keyOf(link.relation, title));
     });
-
-    // Remove stale links
     if (toRemove.length) {
       await db.link.deleteMany({
         where: { id: { in: toRemove.map((l) => l.id) } },
       });
     }
 
-    // Batch-create new links: one findMany for all targets, then createMany
+    // CREATE pass: incoming edges with no existing match.
+    const toCreate = [...incomingByKey.entries()]
+      .filter(([key]) => !existingByKey.has(key))
+      .map(([, wl]) => wl);
+
     if (toCreate.length) {
+      const titles = [...new Set(toCreate.map((wl) => wl.title))];
       const targets = await db.note.findMany({
-        where: { title: { in: toCreate }, userId },
+        where: { title: { in: titles }, userId },
         select: { id: true, title: true },
       });
       const titleToId = new Map(targets.map((n) => [n.title, n.id]));
 
       await db.link.createMany({
-        data: toCreate.map((title) => ({
+        data: toCreate.map((wl) => ({
           fromId: noteId,
-          toId: titleToId.get(title) ?? null,
-          toTitle: titleToId.has(title) ? null : title,
+          toId: titleToId.get(wl.title) ?? null,
+          toTitle: titleToId.has(wl.title) ? null : wl.title,
+          relation: wl.relation,
+          weight: wl.count,
+          source: 'wikilink',
         })),
       });
     }

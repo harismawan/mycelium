@@ -14,6 +14,7 @@ const mockLink = {
   deleteMany: mock(() => ({ count: 0 })),
   create: mock(() => ({})),
   createMany: mock(() => ({ count: 0 })),
+  update: mock(() => ({})),
   updateMany: mock(() => ({ count: 0 })),
 };
 
@@ -39,6 +40,7 @@ beforeEach(() => {
   mockLink.deleteMany.mockReset();
   mockLink.create.mockReset();
   mockLink.createMany.mockReset();
+  mockLink.update.mockReset();
   mockLink.updateMany.mockReset();
 });
 
@@ -46,65 +48,158 @@ beforeEach(() => {
 // reconcileLinks
 // ---------------------------------------------------------------------------
 describe('LinkService.reconcileLinks', () => {
-  test('creates new links for wikilinks not already in the database', async () => {
+  test('creates new resolved links with relation, weight, and source', async () => {
     mockNote.findUnique.mockResolvedValue({ userId: 'user_1' });
-    mockLink.findMany.mockResolvedValue([]); // no existing links
-    // Batch target lookup returns the target note
+    mockLink.findMany.mockResolvedValue([]); // no existing wikilink edges
     mockNote.findMany.mockResolvedValue([{ id: 'target_1', title: 'Target Note' }]);
 
-    await LinkService.reconcileLinks('note_1', ['Target Note']);
+    await LinkService.reconcileLinks('note_1', [
+      { title: 'Target Note', relation: null, count: 1 },
+    ]);
 
     expect(mockLink.createMany).toHaveBeenCalledWith({
-      data: [{ fromId: 'note_1', toId: 'target_1', toTitle: null }],
+      data: [
+        {
+          fromId: 'note_1',
+          toId: 'target_1',
+          toTitle: null,
+          relation: null,
+          weight: 1,
+          source: 'wikilink',
+        },
+      ],
+    });
+  });
+
+  test('scopes the existing-edge lookup to source=wikilink', async () => {
+    mockNote.findUnique.mockResolvedValue({ userId: 'user_1' });
+    mockLink.findMany.mockResolvedValue([]);
+    mockNote.findMany.mockResolvedValue([]);
+
+    await LinkService.reconcileLinks('note_1', []);
+
+    expect(mockLink.findMany).toHaveBeenCalledWith({
+      where: { fromId: 'note_1', source: 'wikilink' },
+      select: { id: true, toTitle: true, toId: true, relation: true, weight: true },
     });
   });
 
   test('creates unresolved link when target note not found', async () => {
     mockNote.findUnique.mockResolvedValue({ userId: 'user_1' });
     mockLink.findMany.mockResolvedValue([]);
-    // Batch target lookup returns nothing — unresolved link
     mockNote.findMany.mockResolvedValue([]);
 
-    await LinkService.reconcileLinks('note_1', ['Missing Note']);
+    await LinkService.reconcileLinks('note_1', [
+      { title: 'Missing Note', relation: null, count: 1 },
+    ]);
 
     expect(mockLink.createMany).toHaveBeenCalledWith({
-      data: [{ fromId: 'note_1', toId: null, toTitle: 'Missing Note' }],
+      data: [
+        {
+          fromId: 'note_1',
+          toId: null,
+          toTitle: 'Missing Note',
+          relation: null,
+          weight: 1,
+          source: 'wikilink',
+        },
+      ],
     });
   });
 
-  test('removes stale links no longer in content', async () => {
+  test('writes the parsed relation and count-as-weight', async () => {
+    mockNote.findUnique.mockResolvedValue({ userId: 'user_1' });
+    mockLink.findMany.mockResolvedValue([]);
+    mockNote.findMany.mockResolvedValue([{ id: 'target_1', title: 'Target' }]);
+
+    await LinkService.reconcileLinks('note_1', [
+      { title: 'Target', relation: 'supports', count: 3 },
+    ]);
+
+    const { data } = mockLink.createMany.mock.calls[0][0];
+    expect(data[0]).toEqual({
+      fromId: 'note_1',
+      toId: 'target_1',
+      toTitle: null,
+      relation: 'supports',
+      weight: 3,
+      source: 'wikilink',
+    });
+  });
+
+  test('UPDATE pass: bumps weight when an existing edge count changes', async () => {
     mockNote.findUnique.mockResolvedValue({ userId: 'user_1' });
     mockLink.findMany.mockResolvedValue([
-      { id: 'link_1', toTitle: 'Old Link', toId: null },
+      { id: 'link_1', toTitle: 'Existing', toId: null, relation: null, weight: 1 },
     ]);
-    mockNote.findMany.mockResolvedValue([]); // no resolved notes to look up
+    mockNote.findMany.mockResolvedValue([]);
 
-    await LinkService.reconcileLinks('note_1', []); // no wikilinks in content
+    await LinkService.reconcileLinks('note_1', [
+      { title: 'Existing', relation: null, count: 3 },
+    ]);
+
+    expect(mockLink.update).toHaveBeenCalledWith({
+      where: { id: 'link_1' },
+      data: { weight: 3 },
+    });
+    expect(mockLink.createMany).not.toHaveBeenCalled();
+    expect(mockLink.deleteMany).not.toHaveBeenCalled();
+  });
+
+  test('does not update when weight is unchanged', async () => {
+    mockNote.findUnique.mockResolvedValue({ userId: 'user_1' });
+    mockLink.findMany.mockResolvedValue([
+      { id: 'link_1', toTitle: 'Existing', toId: null, relation: null, weight: 1 },
+    ]);
+    mockNote.findMany.mockResolvedValue([]);
+
+    await LinkService.reconcileLinks('note_1', [
+      { title: 'Existing', relation: null, count: 1 },
+    ]);
+
+    expect(mockLink.update).not.toHaveBeenCalled();
+    expect(mockLink.createMany).not.toHaveBeenCalled();
+    expect(mockLink.deleteMany).not.toHaveBeenCalled();
+  });
+
+  test('removes stale wikilink edges no longer in content', async () => {
+    mockNote.findUnique.mockResolvedValue({ userId: 'user_1' });
+    mockLink.findMany.mockResolvedValue([
+      { id: 'link_1', toTitle: 'Old Link', toId: null, relation: null, weight: 1 },
+    ]);
+    mockNote.findMany.mockResolvedValue([]);
+
+    await LinkService.reconcileLinks('note_1', []);
 
     expect(mockLink.deleteMany).toHaveBeenCalledWith({
       where: { id: { in: ['link_1'] } },
     });
   });
 
+  test('treats a relation change as remove-then-create (distinct keys)', async () => {
+    mockNote.findUnique.mockResolvedValue({ userId: 'user_1' });
+    mockLink.findMany.mockResolvedValue([
+      { id: 'link_1', toTitle: 'X', toId: null, relation: null, weight: 1 },
+    ]);
+    mockNote.findMany.mockResolvedValue([]);
+
+    await LinkService.reconcileLinks('note_1', [
+      { title: 'X', relation: 'supports', count: 1 },
+    ]);
+
+    expect(mockLink.deleteMany).toHaveBeenCalledWith({ where: { id: { in: ['link_1'] } } });
+    const { data } = mockLink.createMany.mock.calls[0][0];
+    expect(data[0].relation).toBe('supports');
+  });
+
   test('does nothing when source note not found', async () => {
     mockNote.findUnique.mockResolvedValue(null);
 
-    await LinkService.reconcileLinks('nonexistent', ['Some Link']);
-
-    expect(mockLink.create).not.toHaveBeenCalled();
-    expect(mockLink.deleteMany).not.toHaveBeenCalled();
-  });
-
-  test('does not recreate existing links', async () => {
-    mockNote.findUnique.mockResolvedValue({ userId: 'user_1' });
-    mockLink.findMany.mockResolvedValue([
-      { id: 'link_1', toTitle: 'Existing', toId: null },
+    await LinkService.reconcileLinks('nonexistent', [
+      { title: 'Some Link', relation: null, count: 1 },
     ]);
-    mockNote.findMany.mockResolvedValue([]); // no resolved IDs to look up
 
-    await LinkService.reconcileLinks('note_1', ['Existing']);
-
-    expect(mockLink.create).not.toHaveBeenCalled();
+    expect(mockLink.createMany).not.toHaveBeenCalled();
     expect(mockLink.deleteMany).not.toHaveBeenCalled();
   });
 });

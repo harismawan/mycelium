@@ -557,3 +557,87 @@ describe('SearchService.getContext metadata', () => {
     });
   });
 });
+
+// ===========================================================================
+// LinkService._expandNeighbors — multi-seed co-citation BFS (R9)
+// ===========================================================================
+describe('LinkService._expandNeighbors', () => {
+  /** Validates: Requirements 9.1 */
+  test('counts distinct seeds each neighbor links to (outgoing)', async () => {
+    // s1 -> c1, s2 -> c1, s1 -> c2  (c1 co-cited by both seeds)
+    mockLink.findMany
+      .mockResolvedValueOnce([
+        { fromId: 's1', toId: 'c1' },
+        { fromId: 's2', toId: 'c1' },
+        { fromId: 's1', toId: 'c2' },
+      ]) // outLinks for frontier [s1, s2]
+      .mockResolvedValueOnce([]); // inLinks
+
+    mockNote.findMany.mockResolvedValue([
+      { id: 'c1', slug: 'c1', title: 'C1', excerpt: null, updatedAt: new Date('2026-01-02') },
+      { id: 'c2', slug: 'c2', title: 'C2', excerpt: 'ex', updatedAt: new Date('2026-01-01') },
+    ]);
+
+    const out = await LinkService._expandNeighbors('user_1', ['s1', 's2'], 1);
+
+    const byId = Object.fromEntries(out.map((n) => [n.id, n]));
+    expect(out).toHaveLength(2);
+    expect(byId.c1.seedLinks).toBe(2);
+    expect(byId.c2.seedLinks).toBe(1);
+    // full getContext field set carried through
+    expect(byId.c1).toMatchObject({ id: 'c1', slug: 'c1', title: 'C1', excerpt: null });
+  });
+
+  /** Validates: Requirements 9.1 */
+  test('counts incoming links to seeds as co-citations', async () => {
+    // c1 -> s1 (incoming to the seed frontier)
+    mockLink.findMany
+      .mockResolvedValueOnce([]) // outLinks
+      .mockResolvedValueOnce([{ fromId: 'c1', toId: 's1' }]); // inLinks
+
+    mockNote.findMany.mockResolvedValue([
+      { id: 'c1', slug: 'c1', title: 'C1', excerpt: null, updatedAt: new Date('2026-01-02') },
+    ]);
+
+    const out = await LinkService._expandNeighbors('user_1', ['s1', 's2'], 1);
+
+    expect(out).toHaveLength(1);
+    expect(out[0].seedLinks).toBe(1);
+  });
+
+  test('returns empty array for no seeds without touching the database', async () => {
+    const out = await LinkService._expandNeighbors('user_1', [], 1);
+    expect(out).toEqual([]);
+    expect(mockLink.findMany).not.toHaveBeenCalled();
+    expect(mockNote.findMany).not.toHaveBeenCalled();
+  });
+
+  /** Validates: Requirements 9.2 */
+  test('excludes ARCHIVED neighbors (filtered by note.findMany)', async () => {
+    mockLink.findMany
+      .mockResolvedValueOnce([{ fromId: 's1', toId: 'c1' }])
+      .mockResolvedValueOnce([]);
+    // c1 is ARCHIVED, so the status-filtered findMany returns nothing
+    mockNote.findMany.mockResolvedValue([]);
+
+    const out = await LinkService._expandNeighbors('user_1', ['s1'], 1);
+
+    expect(out).toEqual([]);
+    const noteWhere = mockNote.findMany.mock.calls[0][0].where;
+    expect(noteWhere.status).toEqual({ not: 'ARCHIVED' });
+    expect(noteWhere.userId).toBe('user_1');
+  });
+
+  test('depth=1 issues exactly one BFS level (out + in)', async () => {
+    mockLink.findMany
+      .mockResolvedValueOnce([{ fromId: 's1', toId: 'c1' }])
+      .mockResolvedValueOnce([]);
+    mockNote.findMany.mockResolvedValue([
+      { id: 'c1', slug: 'c1', title: 'C1', excerpt: null, updatedAt: new Date() },
+    ]);
+
+    await LinkService._expandNeighbors('user_1', ['s1'], 1);
+
+    expect(mockLink.findMany).toHaveBeenCalledTimes(2); // out + in, one level only
+  });
+});

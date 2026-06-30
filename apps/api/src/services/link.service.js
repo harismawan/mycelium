@@ -2,6 +2,23 @@ import { prisma } from '../db.js';
 import { MAX_GRAPH_NODES, MAX_GRAPH_DEPTH, MAX_LINK_RESULTS } from '@mycelium/shared';
 
 /**
+ * Record that `candidateId` is directly linked to `seedId` in a
+ * candidate -> set-of-seeds map (used for co-citation degree counting).
+ *
+ * @param {Map<string, Set<string>>} map
+ * @param {string} candidateId
+ * @param {string} seedId
+ */
+function addSeedLink(map, candidateId, seedId) {
+  let set = map.get(candidateId);
+  if (!set) {
+    set = new Set();
+    map.set(candidateId, set);
+  }
+  set.add(seedId);
+}
+
+/**
  * Coerce and clamp a requested BFS depth into the safe range [1, MAX_GRAPH_DEPTH].
  *
  * Non-numeric, non-finite, or absent values fall back to the default depth of 1.
@@ -463,5 +480,81 @@ export const LinkService = {
     const validEdges = edges.filter((e) => keptIds.has(e.fromId) && keptIds.has(e.toId));
 
     return { nodes, edges: validEdges, truncated };
+  },
+
+  /**
+   * Multi-seed BFS expansion used by graph-aware recall (R9).
+   *
+   * Starting from a set of lexical-search seed note IDs, traverse resolved
+   * links (both directions) up to `depth` levels, collecting reachable
+   * non-seed, non-ARCHIVED notes with the full getContext field set. For each
+   * collected neighbor, report `seedLinks`: the number of DISTINCT seeds it is
+   * directly linked to (co-citation degree).
+   *
+   * Mirrors the level-step BFS of `_getEgoSubgraph`, generalised to multiple
+   * roots and instrumented with co-citation counts.
+   *
+   * @param {string} userId
+   * @param {string[]} seedIds - Seed note IDs (lexical matches).
+   * @param {number} [depth=1] - BFS depth.
+   * @returns {Promise<Array<{ id: string, slug: string, title: string, excerpt: string|null, updatedAt: Date|string, seedLinks: number }>>}
+   *
+   * Validates: Requirements 9.1, 9.2
+   */
+  async _expandNeighbors(userId, seedIds, depth = 1) {
+    if (!seedIds.length) return [];
+
+    const seedSet = new Set(seedIds);
+    const visited = new Set(seedIds);
+    /** @type {Map<string, { id: string, slug: string, title: string, excerpt: string|null, updatedAt: Date|string }>} */
+    const candidates = new Map();
+    /** @type {Map<string, Set<string>>} candidateId -> set of directly-linked seedIds */
+    const seedLinkMap = new Map();
+
+    let frontier = [...seedIds];
+
+    for (let d = 0; d < depth && frontier.length > 0; d++) {
+      const [outLinks, inLinks] = await Promise.all([
+        prisma.link.findMany({
+          where: { fromId: { in: frontier }, toId: { not: null } },
+          select: { fromId: true, toId: true },
+        }),
+        prisma.link.findMany({
+          where: { toId: { in: frontier } },
+          select: { fromId: true, toId: true },
+        }),
+      ]);
+
+      const neighborIds = new Set();
+      for (const link of [...outLinks, ...inLinks]) {
+        const { fromId, toId } = link;
+        // Direct seed -> candidate connections feed the co-citation count.
+        if (seedSet.has(fromId) && !seedSet.has(toId)) addSeedLink(seedLinkMap, toId, fromId);
+        if (seedSet.has(toId) && !seedSet.has(fromId)) addSeedLink(seedLinkMap, fromId, toId);
+        if (!visited.has(toId)) neighborIds.add(toId);
+        if (!visited.has(fromId)) neighborIds.add(fromId);
+      }
+
+      if (!neighborIds.size) break;
+
+      const neighborNotes = await prisma.note.findMany({
+        where: { id: { in: [...neighborIds] }, userId, status: { not: 'ARCHIVED' } },
+        select: { id: true, slug: true, title: true, excerpt: true, updatedAt: true },
+      });
+
+      frontier = [];
+      for (const note of neighborNotes) {
+        if (!visited.has(note.id)) {
+          visited.add(note.id);
+          candidates.set(note.id, note);
+          frontier.push(note.id);
+        }
+      }
+    }
+
+    return [...candidates.values()].map((note) => ({
+      ...note,
+      seedLinks: seedLinkMap.get(note.id)?.size ?? 0,
+    }));
   },
 };

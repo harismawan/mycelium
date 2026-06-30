@@ -384,6 +384,7 @@ describe('LinkService.getGraph — ego-subgraph', () => {
       fromId: 'n1',
       toId: 'n2',
       relation: null,
+      weight: 1,
       createdAt: edgeCreatedAt,
     });
   });

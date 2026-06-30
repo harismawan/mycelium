@@ -461,6 +461,7 @@ export const LinkService = {
             fromId: link.fromId,
             toId: link.toId,
             relation: link.relation ?? null,
+            weight: link.weight ?? 1,
             createdAt: link.createdAt,
           });
         }

@@ -29,6 +29,7 @@ Write tools require `notes:write`:
 - `delete_directory`: delete only empty directories.
 - `remember`: recall-then-upsert a durable memory tagged `agent-memory`. Matches an existing memory by exact title; `mode` is `append` (default, appends a timestamped section), `replace` (overwrite), or `new` (always create).
 - `save_memory`: thin alias for `remember` with append-on-duplicate (no `mode` parameter). Prefer `remember` when you need `replace` or `new`.
+- `save_memories`: batch-file up to 25 findings in one call; each is published and tagged `agent-memory`. Returns a per-item result array `{index,id,slug,action,error}`; one bad item does not fail the rest.
 - `set_session_context`: store ephemeral per-session key/value context.
 
 ## Operating Rules
@@ -61,6 +62,8 @@ Mycelium memory is a loop: recall before you write, consolidate so you do not du
 - Wiped on disconnect. The store is destroyed when the connection closes: stdio shutdown (`SIGINT`, `SIGTERM`, or stdin end) or HTTP transport close, taking every key with it.
 
 Because of this, put any fact you want to keep into a note via `save_memory`. Use session context only for short-lived state within a single working session.
+
+At session end, prefer `save_memories({ memories: [...] })` to flush several findings in one call instead of repeated `save_memory` calls. Inspect each item's `error` in the returned array and retry only the failed items.
 
 ## Directory Workflow
 

@@ -15,6 +15,7 @@ import { register as registerUpdateDirectory } from './tools/update-directory.js
 import { register as registerDeleteDirectory } from './tools/delete-directory.js';
 import { register as registerGetContext } from './tools/get-context.js';
 import { register as registerSaveMemory } from './tools/save-memory.js';
+import { register as registerSaveMemories } from './tools/save-memories.js';
 import { register as registerRemember } from './tools/remember.js';
 import { register as registerSetSessionContext } from './tools/set-session-context.js';
 import { register as registerGetSessionContext } from './tools/get-session-context.js';
@@ -57,6 +58,7 @@ export function createServer(authContext) {
   registerGetContext(server, authContext);
   registerRemember(server, authContext);
   registerSaveMemory(server, authContext);
+  registerSaveMemories(server, authContext);
 
   // Session context tools
   registerSetSessionContext(server, authContext);

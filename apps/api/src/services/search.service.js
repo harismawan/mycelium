@@ -1,4 +1,4 @@
-import { DEFAULT_PAGE_LIMIT } from '@mycelium/shared';
+import { DEFAULT_PAGE_LIMIT, MEMORY_NAMESPACE_DIR } from '@mycelium/shared';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../db.js';
 import { LinkService } from './link.service.js';
@@ -36,6 +36,28 @@ function encodeCursor(note) {
   return Buffer.from(
     JSON.stringify({ rank: Number(note.rank), updatedAt, id: note.id }),
   ).toString('base64url');
+}
+
+/**
+ * Resolve the directory id for the memories/<apiKeyId> namespace subtree.
+ * Read-only: returns null (never creates) when the subtree does not exist.
+ *
+ * @param {string} userId
+ * @param {string} apiKeyId
+ * @returns {Promise<string | null>}
+ */
+async function resolveNamespaceDirId(userId, apiKeyId) {
+  const root = await prisma.directory.findFirst({
+    where: { userId, parentId: null, name: MEMORY_NAMESPACE_DIR },
+    select: { id: true },
+  });
+  if (!root) return null;
+
+  const child = await prisma.directory.findFirst({
+    where: { userId, parentId: root.id, name: apiKeyId },
+    select: { id: true },
+  });
+  return child?.id ?? null;
 }
 
 function decodeCursor(cursor) {
@@ -161,15 +183,26 @@ export const SearchService = {
    * metadata, while expand=true returns a minimal shape for context hydration.
    *
    * @param {string} userId
-   * @param {{ topic?: string, limit?: number, expand?: boolean, expandDepth?: number }} [opts={}]
+   * @param {{ topic?: string, limit?: number, expand?: boolean, expandDepth?: number, namespace?: string }} [opts={}]
    * @returns {Promise<Array<{ id: string, slug: string, title: string, excerpt: string | null, tags: string[], updatedAt: string } | { id: string, slug: string, title: string, excerpt: string | null, source: string | null, confidence: number | null, importance: number | null, score: number | null, snippet: string | null, tags: string[], updatedAt: string }>>} — expand=false returns rich shape (with source, confidence, importance, score, snippet); expand=true returns minimal shape (id, slug, title, excerpt, tags, updatedAt only)
    */
   async getContext(userId, opts = {}) {
     const limit = opts.limit ?? DEFAULT_PAGE_LIMIT;
 
+    // Optional namespace filter: scope to the memories/<apiKeyId> subtree.
+    let namespaceDirId;
+    if (opts.namespace) {
+      namespaceDirId = await resolveNamespaceDirId(userId, opts.namespace);
+      if (!namespaceDirId) return [];
+    }
+
     if (!opts.topic) {
       const notes = await prisma.note.findMany({
-        where: { userId, status: { not: 'ARCHIVED' } },
+        where: {
+          userId,
+          status: { not: 'ARCHIVED' },
+          ...(namespaceDirId ? { directoryId: namespaceDirId } : {}),
+        },
         take: limit,
         orderBy: [{ pinned: 'desc' }, { updatedAt: 'desc' }, { id: 'asc' }],
         include: { tags: true },
@@ -201,6 +234,7 @@ export const SearchService = {
         FROM "Note" n
         WHERE n."userId" = ${userId}
           AND n."status" != 'ARCHIVED'
+          ${namespaceDirId ? Prisma.sql`AND n."directoryId" = ${namespaceDirId}` : Prisma.empty}
           AND n."searchVector" @@ ${tsQuery}
         ORDER BY rank DESC, n."updatedAt" DESC
         LIMIT ${limit}
@@ -249,6 +283,7 @@ export const SearchService = {
       FROM "Note" n
       WHERE n."userId" = ${userId}
         AND n."status" != 'ARCHIVED'
+        ${namespaceDirId ? Prisma.sql`AND n."directoryId" = ${namespaceDirId}` : Prisma.empty}
         AND n."searchVector" @@ ${tsQuery}
       ORDER BY n."pinned" DESC, ts_rank(n."searchVector", ${tsQuery}) * (1 + COALESCE(n."importance", 0) * ${IMPORTANCE_BOOST}) DESC, n."updatedAt" DESC
       LIMIT ${limit}
@@ -263,6 +298,7 @@ export const SearchService = {
         FROM "Note" n
         WHERE n."userId" = ${userId}
           AND n."status" != 'ARCHIVED'
+          ${namespaceDirId ? Prisma.sql`AND n."directoryId" = ${namespaceDirId}` : Prisma.empty}
           AND similarity(n."title", ${opts.topic}) > ${TRIGRAM_SIMILARITY_THRESHOLD}
         ORDER BY score DESC, n."updatedAt" DESC
         LIMIT ${limit}

@@ -96,3 +96,11 @@ export const RELATION_VOCAB = Object.freeze([
  * @type {number}
  */
 export const GRAPH_DECAY = 0.5;
+
+/**
+ * Name of the root directory that holds agent-written memory notes.
+ * Per-API-key memories are namespaced as `memories/<apiKeyId>` beneath it.
+ *
+ * @type {string}
+ */
+export const MEMORY_NAMESPACE_DIR = 'memories';

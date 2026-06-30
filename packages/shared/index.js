@@ -33,5 +33,6 @@ export {
   MAX_LINK_RESULTS,
   GRAPH_DECAY,
   RELATION_VOCAB,
+  MEMORY_NAMESPACE_DIR,
 } from './constants.js';
 

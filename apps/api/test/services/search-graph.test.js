@@ -12,6 +12,9 @@ const mockLink = {
   findMany: mock(() => []),
 };
 const mockQueryRaw = mock(() => []);
+const mockDirectory = {
+  findFirst: mock(() => null),
+};
 
 mock.module('@prisma/client', () => ({
   PrismaClient: class {
@@ -19,6 +22,7 @@ mock.module('@prisma/client', () => ({
       this.note = mockNote;
       this.link = mockLink;
       this.$queryRaw = mockQueryRaw;
+      this.directory = mockDirectory;
     }
   },
   Prisma: {
@@ -47,6 +51,7 @@ beforeEach(() => {
   mockNote.findFirst.mockReset();
   mockLink.findMany.mockReset();
   mockQueryRaw.mockReset();
+  mockDirectory.findFirst.mockReset();
 });
 
 // ===========================================================================
@@ -826,6 +831,32 @@ describe('SearchService.getContext — expand', () => {
     const out = await SearchService.getContext(userId, { topic: 'nope', expand: true });
     expect(out).toEqual([]);
     expect(mockLink.findMany).not.toHaveBeenCalled();
+  });
+});
+
+// ===========================================================================
+// SearchService.getContext — namespace filter (R11.3)
+// ===========================================================================
+describe('SearchService.getContext — namespace filter', () => {
+  test('filters the no-topic branch to the memories/<apiKeyId> subtree', async () => {
+    mockDirectory.findFirst
+      .mockResolvedValueOnce({ id: 'mem-root' })   // memories root
+      .mockResolvedValueOnce({ id: 'ns-key-A' });  // memories/key-A
+    mockNote.findMany.mockResolvedValue([]);
+
+    await SearchService.getContext(userId, { namespace: 'key-A' });
+
+    const where = mockNote.findMany.mock.calls[0][0].where;
+    expect(where.directoryId).toBe('ns-key-A');
+  });
+
+  test('returns [] without querying notes when the namespace dir is absent', async () => {
+    mockDirectory.findFirst.mockResolvedValue(null); // no memories root
+
+    const res = await SearchService.getContext(userId, { namespace: 'key-A' });
+
+    expect(res).toEqual([]);
+    expect(mockNote.findMany).not.toHaveBeenCalled();
   });
 });
 

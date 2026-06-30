@@ -9,6 +9,11 @@
  *   - edge label   ← `relation` (only for typed edges)
  *   - arrowheads   ← edge direction (from → to)
  *
+ * Chrome (toolbar/legend) uses the app theme tokens (CSS vars); the Cytoscape
+ * canvas can't read CSS vars, so the theme tokens are read at runtime via
+ * getComputedStyle and re-read on theme toggle so the graph matches the
+ * active (black) dark theme rather than a hardcoded palette.
+ *
  * Interaction:
  *   - click a node  → recenter the ego-subgraph on it (explore outward)
  *   - dbl-click     → open the note
@@ -31,6 +36,7 @@ if (!cytoscape.__fcoseRegistered) {
   cytoscape.__fcoseRegistered = true;
 }
 
+// Semantic data-encoding palettes (intentional, theme-independent).
 const STATUS_COLORS = {
   DRAFT: '#f59e0b',
   PUBLISHED: '#22c55e',
@@ -42,11 +48,30 @@ const DEFAULT_NODE_COLOR = '#6b7280';
 const RELATION_COLORS = {
   supports: '#22c55e',
   contradicts: '#ef4444',
-  'derived-from': '#3b82f6',
-  refines: '#a855f7',
-  'related-to': '#14b8a6',
+  'derived-from': '#60a5fa',
+  refines: '#a78bfa',
+  'related-to': '#2dd4bf',
 };
-const DEFAULT_EDGE_COLOR = '#4b5563';
+const DEFAULT_EDGE_COLOR = '#5a5a5a';
+
+// Read the active theme's chrome tokens for the canvas (which can't use CSS vars).
+function readThemeTokens() {
+  const fallback = {
+    text: '#e2e8f0',
+    textSecondary: '#8b8b8b',
+    border: '#2e2e2e',
+    surface: '#1f1f1f',
+  };
+  if (typeof window === 'undefined') return fallback;
+  const cs = getComputedStyle(document.documentElement);
+  const get = (name, fb) => cs.getPropertyValue(name).trim() || fb;
+  return {
+    text: get('--color-text', fallback.text),
+    textSecondary: get('--color-text-secondary', fallback.textSecondary),
+    border: get('--color-border', fallback.border),
+    surface: get('--color-bg-surface', fallback.surface),
+  };
+}
 
 const CenteredMessage = styled.div`
   display: flex;
@@ -62,52 +87,63 @@ const GraphContainer = styled.div`
   width: 100%;
   height: 100%;
   overflow: hidden;
+  background: var(--color-bg);
 `;
 
-const Toolbar = styled.div`
+const Panel = styled.div`
   position: absolute;
+  z-index: 10;
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  box-shadow: 0 2px 8px var(--color-shadow);
+  color: var(--color-text-secondary);
+`;
+
+const Toolbar = styled(Panel)`
   top: 12px;
   left: 12px;
-  z-index: 10;
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 6px 10px;
-  background: rgba(17, 24, 39, 0.85);
-  border: 1px solid var(--color-border, #374151);
-  border-radius: 8px;
   font-size: 13px;
-  color: var(--color-text-secondary, #d1d5db);
 `;
 
 const ToolButton = styled.button`
-  background: var(--color-surface, #1f2937);
-  color: var(--color-text, #e5e7eb);
-  border: 1px solid var(--color-border, #374151);
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
   border-radius: 6px;
   padding: 3px 8px;
   font-size: 12px;
   cursor: pointer;
+  &:hover {
+    background: var(--color-bg-active);
+  }
   &:disabled {
     opacity: 0.5;
     cursor: default;
   }
 `;
 
-const Legend = styled.div`
-  position: absolute;
+const DepthSelect = styled.select`
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 2px 4px;
+  font-size: 12px;
+`;
+
+const Legend = styled(Panel)`
   bottom: 12px;
   left: 12px;
-  z-index: 10;
   display: flex;
   flex-direction: column;
   gap: 6px;
   padding: 8px 10px;
-  background: rgba(17, 24, 39, 0.85);
-  border: 1px solid var(--color-border, #374151);
-  border-radius: 8px;
   font-size: 11px;
-  color: var(--color-text-secondary, #d1d5db);
 `;
 
 const LegendRow = styled.div`
@@ -130,53 +166,6 @@ const Swatch = styled.span`
   }
 `;
 
-const STYLESHEET = [
-  {
-    selector: 'node',
-    style: {
-      'background-color': 'data(color)',
-      width: 'data(size)',
-      height: 'data(size)',
-      label: 'data(label)',
-      color: '#e5e7eb',
-      'font-size': 10,
-      'text-valign': 'bottom',
-      'text-halign': 'center',
-      'text-margin-y': 3,
-      'text-wrap': 'ellipsis',
-      'text-max-width': 120,
-      'min-zoomed-font-size': 7,
-      'border-width': 0,
-    },
-  },
-  {
-    selector: 'node[?focus]',
-    style: { 'border-width': 3, 'border-color': '#e5e7eb' },
-  },
-  {
-    selector: 'edge',
-    style: {
-      width: 'data(width)',
-      'line-color': 'data(color)',
-      'target-arrow-color': 'data(color)',
-      'target-arrow-shape': 'triangle',
-      'arrow-scale': 0.8,
-      'curve-style': 'bezier',
-      label: 'data(label)',
-      'font-size': 8,
-      color: '#9ca3af',
-      'text-rotation': 'autorotate',
-      'text-background-color': '#111827',
-      'text-background-opacity': 0.6,
-      'text-background-padding': 1,
-      opacity: 0.85,
-    },
-  },
-  { selector: 'node:selected', style: { 'border-width': 2, 'border-color': '#e5e7eb' } },
-  { selector: 'node.faded', style: { opacity: 0.25 } },
-  { selector: 'edge.faded', style: { opacity: 0.08 } },
-];
-
 const LAYOUT = {
   name: 'fcose',
   quality: 'default',
@@ -197,6 +186,14 @@ export default function GraphPage() {
   const [focusSlug, setFocusSlug] = useState(null);
   const [depth, setDepth] = useState(1);
 
+  // Theme tokens for the canvas; re-read when the app toggles data-theme.
+  const [tokens, setTokens] = useState(readThemeTokens);
+  useEffect(() => {
+    const obs = new MutationObserver(() => setTokens(readThemeTokens()));
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    return () => obs.disconnect();
+  }, []);
+
   const { data, isLoading, error } = useGraph(focusSlug ?? undefined, focusSlug ? depth : undefined);
 
   // Hide right pane on mount, restore on unmount.
@@ -209,6 +206,62 @@ export default function GraphPage() {
       if (prevRightPane.current) useUIStore.setState({ rightPaneOpen: true });
     };
   }, []);
+
+  const stylesheet = useMemo(
+    () => [
+      {
+        selector: 'node',
+        style: {
+          'background-color': 'data(color)',
+          width: 'data(size)',
+          height: 'data(size)',
+          label: 'data(label)',
+          color: tokens.text,
+          'font-size': 10,
+          'text-valign': 'bottom',
+          'text-halign': 'center',
+          'text-margin-y': 3,
+          'text-wrap': 'ellipsis',
+          'text-max-width': 120,
+          'min-zoomed-font-size': 7,
+          'border-width': 0,
+        },
+      },
+      {
+        selector: 'node[?focus]',
+        style: { 'border-width': 3, 'border-color': tokens.text },
+      },
+      {
+        selector: 'edge',
+        style: {
+          width: 'data(width)',
+          'line-color': 'data(color)',
+          'target-arrow-color': 'data(color)',
+          'target-arrow-shape': 'triangle',
+          'arrow-scale': 0.8,
+          'curve-style': 'bezier',
+          label: 'data(label)',
+          'font-size': 8,
+          color: tokens.textSecondary,
+          'text-rotation': 'autorotate',
+          'text-background-color': tokens.surface,
+          'text-background-opacity': 0.85,
+          'text-background-padding': 1,
+          opacity: 0.9,
+        },
+      },
+      { selector: 'node:selected', style: { 'border-width': 2, 'border-color': tokens.text } },
+      { selector: 'node.faded', style: { opacity: 0.2 } },
+      { selector: 'edge.faded', style: { opacity: 0.06 } },
+    ],
+    [tokens],
+  );
+
+  // Apply theme changes to a live graph without remounting.
+  useEffect(() => {
+    const cy = cyRef.current;
+    if (cy) cy.style(stylesheet);
+  }, [stylesheet]);
 
   const elements = useMemo(() => {
     if (!data) return [];
@@ -231,7 +284,6 @@ export default function GraphPage() {
         color: STATUS_COLORS[n.status] ?? DEFAULT_NODE_COLOR,
         size: sizeFor(n.score),
         hop: n.hop ?? null,
-        // Mark the ego centre (hop 0, or the focused slug) for the focus ring.
         focus: focusSlug != null && (n.slug === focusSlug || n.hop === 0) ? 1 : 0,
       },
     }));
@@ -262,19 +314,14 @@ export default function GraphPage() {
       cyRef.current = cy;
       cy.removeAllListeners();
 
-      // Single click → recenter the ego-subgraph on the clicked node.
       cy.on('tap', 'node', (evt) => {
         const slug = evt.target.data('slug');
         if (slug) setFocusSlug(slug);
       });
-
-      // Double click → open the note.
       cy.on('dbltap', 'node', (evt) => {
         const slug = evt.target.data('slug');
         if (slug) navigate(`/notes/${slug}`);
       });
-
-      // Hover → highlight the node's neighbourhood.
       cy.on('mouseover', 'node', (evt) => {
         const keep = evt.target.closedNeighborhood();
         cy.elements().addClass('faded');
@@ -285,7 +332,6 @@ export default function GraphPage() {
     [navigate],
   );
 
-  // Re-run layout + fit whenever the element set changes.
   useEffect(() => {
     const cy = cyRef.current;
     if (!cy || elements.length === 0) return;
@@ -313,18 +359,14 @@ export default function GraphPage() {
           <>
             <ToolButton onClick={() => setFocusSlug(null)}>← Full graph</ToolButton>
             <span>
-              Focus: <strong style={{ color: '#e5e7eb' }}>{focusTitle}</strong>
+              Focus: <strong style={{ color: 'var(--color-text)' }}>{focusTitle}</strong>
             </span>
             <span>depth</span>
-            <select
-              value={depth}
-              onChange={(e) => setDepth(Number(e.target.value))}
-              style={{ background: '#1f2937', color: '#e5e7eb', border: '1px solid #374151', borderRadius: 6 }}
-            >
+            <DepthSelect value={depth} onChange={(e) => setDepth(Number(e.target.value))}>
               <option value={1}>1</option>
               <option value={2}>2</option>
               <option value={3}>3</option>
-            </select>
+            </DepthSelect>
           </>
         ) : (
           <span>Full graph · click a node to focus · double-click to open</span>
@@ -337,7 +379,7 @@ export default function GraphPage() {
         <CytoscapeComponent
           key={focusSlug ?? '__full__'}
           elements={elements}
-          stylesheet={STYLESHEET}
+          stylesheet={stylesheet}
           layout={LAYOUT}
           cy={handleCy}
           style={{ width: '100%', height: '100%' }}
@@ -349,13 +391,13 @@ export default function GraphPage() {
 
       <Legend>
         <LegendRow>
-          <span style={{ color: '#9ca3af' }}>nodes</span>
+          <span style={{ color: 'var(--color-text-muted)' }}>nodes</span>
           <Swatch $color={STATUS_COLORS.PUBLISHED}>published</Swatch>
           <Swatch $color={STATUS_COLORS.DRAFT}>draft</Swatch>
           <Swatch $color={STATUS_COLORS.ARCHIVED}>archived</Swatch>
         </LegendRow>
         <LegendRow>
-          <span style={{ color: '#9ca3af' }}>edges</span>
+          <span style={{ color: 'var(--color-text-muted)' }}>edges</span>
           <Swatch $line $color={RELATION_COLORS.supports}>supports</Swatch>
           <Swatch $line $color={RELATION_COLORS.contradicts}>contradicts</Swatch>
           <Swatch $line $color={RELATION_COLORS['derived-from']}>derived-from</Swatch>

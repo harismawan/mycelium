@@ -22,6 +22,11 @@ export const MessageResponse = t.Object({
   message: t.String({ description: 'Success message', examples: ['Operation completed'] }),
 });
 
+/** Result of a maintenance auto-archival sweep. */
+export const ForgetStaleResponse = t.Object({
+  archived: t.Integer({ description: 'Number of notes archived in this sweep', examples: [3] }),
+});
+
 // ─── User / Auth Responses ───────────────────────────────────────────────────
 
 /** User object returned by auth endpoints */

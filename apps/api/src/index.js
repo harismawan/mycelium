@@ -12,6 +12,7 @@ import { tagRoutes } from './routes/tags.routes.js';
 import { directoryRoutes } from './routes/directory.routes.js';
 import { graphRoutes } from './routes/graph.routes.js';
 import { agentRoutes } from './routes/agent.routes.js';
+import { maintenanceRoutes } from './routes/maintenance.routes.js';
 import { activityLogRoutes } from './routes/activity-log.routes.js';
 
 const port = process.env.PORT || 3000;
@@ -83,6 +84,7 @@ if (shouldEnableSwagger) {
           { name: 'Directories', description: 'Nested note directory organization' },
           { name: 'Graph', description: 'Knowledge graph and link traversal' },
           { name: 'Agent', description: 'Machine-friendly endpoints for AI agent consumption' },
+          { name: 'Maintenance', description: 'Externally-scheduled upkeep (auto-archival of stale memories)' },
           { name: 'API Keys', description: 'API key creation, listing, and revocation' },
           { name: 'Activity Log', description: 'Audit log of API-key-authenticated actions' },
         ],
@@ -123,6 +125,7 @@ app
   .use(directoryRoutes)
   .use(graphRoutes)
   .use(agentRoutes)
+  .use(maintenanceRoutes)
   .use(activityLogRoutes)
   .listen(port);
 

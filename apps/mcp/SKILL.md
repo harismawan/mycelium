@@ -91,6 +91,22 @@ To avoid duplicates, both recall an existing memory with the **exact same title*
 
 Reuse a stable title across sessions to let updates consolidate onto one note.
 
+## Forgetting & maintenance
+
+Recall is salience-weighted: every `get_context` read bumps a note's
+`lastAccessedAt`/`accessCount` (without changing its edit timestamp), and topic
+recall decays toward recently-used memories. Memories you stop using sink in
+ranking automatically — you do not need to delete them.
+
+Stale, non-pinned, low-importance memories are auto-archived (soft-delete, never
+destroyed; restore by un-archiving) by `POST /api/v1/maintenance/forget-stale`
+(`{ "olderThanDays"?: number }`, defaults to 90 days; requires `notes:write`).
+
+Operational note: this is a manual/external trigger. Mycelium runs **no**
+in-process scheduler — wire the endpoint to your own cron / k8s CronJob with a
+`notes:write` API key. Memories that are pinned or marked high-importance are
+never auto-archived.
+
 ## Common Workflows
 
 Load context:

@@ -208,7 +208,7 @@ export const LinkService = {
    * the provided noteId.
    *
    * @param {string} noteId - The target note ID.
-   * @returns {Promise<import('@prisma/client').Note[]>} Notes linking to this note.
+   * @returns {Promise<Array<import('@prisma/client').Note & { relation: string|null, weight: number }>>} Source notes linking to this note, each decorated with the linking edge's relation and weight.
    *
    * Validates: Requirements 2.5
    */
@@ -297,6 +297,7 @@ export const LinkService = {
    * @property {string} fromId
    * @property {string} toId
    * @property {string|null} relation
+   * @property {number} weight
    */
 
   /**

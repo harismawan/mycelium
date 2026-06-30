@@ -482,4 +482,32 @@ describe('LinkService.getGraph — ego-subgraph', () => {
     // depth coerced to 1 → exactly one BFS level → 2 link.findMany calls (out + in)
     expect(mockLink.findMany).toHaveBeenCalledTimes(2);
   });
+
+  /** Validates: R7.5 — ego dedup key is `fromId->toId::relation`, not `fromId->toId` */
+  test('dedup key includes relation — same pair with distinct relations produces two edges', async () => {
+    const startNote = { id: 'n1', slug: 'center', title: 'Center', status: 'PUBLISHED' };
+    const neighborNote = { id: 'n2', slug: 'neighbor', title: 'Neighbor', status: 'DRAFT' };
+
+    mockNote.findFirst.mockResolvedValue(startNote);
+
+    // Two links between the same pair (n1 → n2) but with different relations.
+    // Under the old dedup key (`${fromId}->${toId}`) the second would be collapsed
+    // into the first, leaving only 1 edge.  The current key (`…::${relation}`)
+    // must preserve both.
+    mockLink.findMany
+      .mockResolvedValueOnce([
+        { fromId: 'n1', toId: 'n2', relation: 'supports', weight: 1 },
+        { fromId: 'n1', toId: 'n2', relation: 'refines', weight: 2 },
+      ])  // outLinks
+      .mockResolvedValueOnce([]);  // inLinks (none)
+
+    mockNote.findMany.mockResolvedValue([neighborNote]);
+
+    const graph = await LinkService.getGraph(userId, { slug: 'center', depth: 1 });
+
+    expect(graph.edges).toHaveLength(2);
+    const relations = graph.edges.map((e) => e.relation);
+    expect(relations).toContain('supports');
+    expect(relations).toContain('refines');
+  });
 });

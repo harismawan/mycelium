@@ -60,3 +60,62 @@ describe('SearchService lexical operators', () => {
     expect(sql).not.toContain('plainto_tsquery');
   });
 });
+
+// ===========================================================================
+// getContext — exposed score + ts_headline snippet
+// ===========================================================================
+describe('SearchService.getContext score + snippet', () => {
+  test('topic branch returns ts_rank score and ts_headline snippet, and selects both', async () => {
+    mockQueryRaw
+      .mockResolvedValueOnce([
+        {
+          id: 'n1',
+          slug: 'graph-memory',
+          title: 'Graph memory',
+          excerpt: 'old static excerpt',
+          updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+          score: 0.42,
+          snippet: '<b>graph</b> as agent <b>memory</b>',
+        },
+      ]) // main websearch query
+      .mockResolvedValueOnce([{ noteId: 'n1', name: 'memory' }]); // tag rows
+
+    const out = await SearchService.getContext(userId, { topic: 'graph memory' });
+
+    const sql = JSON.stringify(mockQueryRaw.mock.calls[0]);
+    expect(sql).toContain('ts_rank');
+    expect(sql).toContain('ts_headline');
+
+    expect(out).toHaveLength(1);
+    expect(out[0]).toEqual({
+      id: 'n1',
+      slug: 'graph-memory',
+      title: 'Graph memory',
+      excerpt: 'old static excerpt',
+      score: 0.42,
+      snippet: '<b>graph</b> as agent <b>memory</b>',
+      tags: ['memory'],
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    });
+  });
+
+  test('recent-notes branch returns score:null and snippet=excerpt', async () => {
+    mockNote.findMany.mockResolvedValue([
+      {
+        id: 'n1',
+        slug: 'recent-1',
+        title: 'Recent 1',
+        excerpt: 'recent excerpt',
+        updatedAt: new Date('2026-02-02T00:00:00.000Z'),
+        tags: [{ name: 't1' }],
+      },
+    ]);
+
+    const out = await SearchService.getContext(userId, {});
+
+    expect(out[0].score).toBeNull();
+    expect(out[0].snippet).toBe('recent excerpt');
+    expect(out[0].tags).toEqual(['t1']);
+    expect(out[0].updatedAt).toBe('2026-02-02T00:00:00.000Z');
+  });
+});

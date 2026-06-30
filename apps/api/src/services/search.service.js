@@ -100,7 +100,7 @@ export const SearchService = {
    *
    * @param {string} userId
    * @param {{ topic?: string, limit?: number }} [opts={}]
-   * @returns {Promise<Array<{ id: string, slug: string, title: string, excerpt: string | null, tags: string[], updatedAt: string }>>}
+   * @returns {Promise<Array<{ id: string, slug: string, title: string, excerpt: string | null, score: number | null, snippet: string | null, tags: string[], updatedAt: string }>>}
    */
   async getContext(userId, opts = {}) {
     const limit = opts.limit ?? DEFAULT_PAGE_LIMIT;
@@ -118,19 +118,24 @@ export const SearchService = {
         slug: note.slug,
         title: note.title,
         excerpt: note.excerpt,
+        score: null,
+        snippet: note.excerpt,
         tags: note.tags.map((tag) => tag.name),
         updatedAt: note.updatedAt.toISOString(),
       }));
     }
 
     const tsQuery = Prisma.sql`websearch_to_tsquery('english', ${opts.topic})`;
-    const results = await prisma.$queryRaw`
-      SELECT n."id", n."slug", n."title", n."excerpt", n."updatedAt"
+    let results = await prisma.$queryRaw`
+      SELECT n."id", n."slug", n."title", n."excerpt", n."updatedAt",
+             ts_rank(n."searchVector", ${tsQuery}) AS score,
+             ts_headline('english', n."content", ${tsQuery},
+               'MaxFragments=2, MaxWords=30') AS snippet
       FROM "Note" n
       WHERE n."userId" = ${userId}
         AND n."status" != 'ARCHIVED'
         AND n."searchVector" @@ ${tsQuery}
-      ORDER BY ts_rank(n."searchVector", ${tsQuery}) DESC, n."updatedAt" DESC
+      ORDER BY score DESC, n."updatedAt" DESC
       LIMIT ${limit}
     `;
 
@@ -156,6 +161,8 @@ export const SearchService = {
       slug: note.slug,
       title: note.title,
       excerpt: note.excerpt,
+      score: note.score == null ? null : Number(note.score),
+      snippet: note.snippet ?? note.excerpt,
       tags: tagMap.get(note.id) ?? [],
       updatedAt: note.updatedAt instanceof Date ? note.updatedAt.toISOString() : note.updatedAt,
     }));

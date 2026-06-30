@@ -320,3 +320,57 @@ describe('LinkService.getOutgoingLinks', () => {
     expect(result.resolved).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// autoLink
+// ---------------------------------------------------------------------------
+describe('LinkService.autoLink', () => {
+  test('creates semantic edges for new targets with weight 1', async () => {
+    mockLink.findMany.mockResolvedValue([]); // no existing edges to these targets
+
+    await LinkService.autoLink('note_1', ['t1', 't2'], {
+      relation: 'related-to',
+      source: 'semantic',
+    });
+
+    expect(mockLink.createMany).toHaveBeenCalledWith({
+      data: [
+        { fromId: 'note_1', toId: 't1', toTitle: null, relation: 'related-to', weight: 1, source: 'semantic' },
+        { fromId: 'note_1', toId: 't2', toTitle: null, relation: 'related-to', weight: 1, source: 'semantic' },
+      ],
+      skipDuplicates: true,
+    });
+  });
+
+  test('skips targets that already have an edge from this note', async () => {
+    mockLink.findMany.mockResolvedValue([{ toId: 't1' }]);
+
+    await LinkService.autoLink('note_1', ['t1', 't2'], {
+      relation: 'related-to',
+      source: 'semantic',
+    });
+
+    const { data } = mockLink.createMany.mock.calls[0][0];
+    expect(data).toEqual([
+      { fromId: 'note_1', toId: 't2', toTitle: null, relation: 'related-to', weight: 1, source: 'semantic' },
+    ]);
+  });
+
+  test('excludes self-references and dedupes targets', async () => {
+    mockLink.findMany.mockResolvedValue([]);
+
+    await LinkService.autoLink('note_1', ['note_1', 't1', 't1'], {
+      relation: 'related-to',
+      source: 'semantic',
+    });
+
+    const { data } = mockLink.createMany.mock.calls[0][0];
+    expect(data).toHaveLength(1);
+    expect(data[0].toId).toBe('t1');
+  });
+
+  test('is a no-op for empty target lists', async () => {
+    await LinkService.autoLink('note_1', [], { relation: 'related-to', source: 'semantic' });
+    expect(mockLink.createMany).not.toHaveBeenCalled();
+  });
+});

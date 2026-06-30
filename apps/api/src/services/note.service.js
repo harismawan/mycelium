@@ -8,8 +8,14 @@ import {
 } from '@mycelium/shared';
 import { prisma } from '../db.js';
 import { LinkService } from './link.service.js';
+import { SearchService } from './search.service.js';
 import { DirectoryService } from './directory.service.js';
 import { sanitizeMarkdown } from '../utils/sanitize.js';
+
+/** Max number of semantic auto-link edges created per new note. */
+const AUTO_LINK_TOP_K = 5;
+/** Minimum `ts_rank` a candidate must reach to be auto-linked. */
+const AUTO_LINK_MIN_RANK = 0.01;
 
 /**
  * Note service handling CRUD operations, the Markdown save pipeline,
@@ -96,6 +102,9 @@ export const NoteService = {
 
       return created;
     });
+
+    // Best-effort semantic auto-linking, outside the write transaction.
+    await autoLinkSemantic(userId, note.id, title);
 
     return note;
   },
@@ -541,4 +550,36 @@ async function resolveUnresolvedLinks(tx, noteId, title, userId) {
       toTitle: null,
     },
   });
+}
+
+/**
+ * Auto-link a freshly created note to its top semantic neighbours.
+ *
+ * Runs a full-text search for the note's title, keeps the top-K candidates
+ * above {@link AUTO_LINK_MIN_RANK} (excluding the note itself), and creates
+ * derived `related-to`/`semantic` edges. Best-effort: a search failure must
+ * never fail note creation.
+ *
+ * @param {string} userId
+ * @param {string} noteId
+ * @param {string} title
+ */
+async function autoLinkSemantic(userId, noteId, title) {
+  try {
+    const { notes } = await SearchService.search(userId, title, {
+      limit: AUTO_LINK_TOP_K + 1,
+    });
+    const targetIds = notes
+      .filter((n) => n.id !== noteId && Number(n.rank) >= AUTO_LINK_MIN_RANK)
+      .slice(0, AUTO_LINK_TOP_K)
+      .map((n) => n.id);
+    if (targetIds.length) {
+      await LinkService.autoLink(noteId, targetIds, {
+        relation: 'related-to',
+        source: 'semantic',
+      });
+    }
+  } catch {
+    // Auto-linking is best-effort; swallow so note creation always succeeds.
+  }
 }

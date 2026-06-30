@@ -25,6 +25,9 @@ const mockTag = {
 const mockRevision = {
   create: mock(() => ({})),
 };
+const mockSearchService = {
+  search: mock(() => ({ notes: [], nextCursor: null })),
+};
 
 /** Tracks the callback/array passed to $transaction so we can inspect calls */
 const mockTransaction = mock(async (arg) => {
@@ -51,6 +54,10 @@ mock.module('@prisma/client', () => ({
       this.$transaction = mockTransaction;
     }
   },
+}));
+
+mock.module('../../src/services/search.service.js', () => ({
+  SearchService: mockSearchService,
 }));
 
 // ---------------------------------------------------------------------------
@@ -96,6 +103,8 @@ beforeEach(() => {
   mockLink.updateMany.mockReset();
   mockTag.findMany.mockReset();
   mockRevision.create.mockReset();
+  mockSearchService.search.mockReset();
+  mockSearchService.search.mockResolvedValue({ notes: [], nextCursor: null });
   mockTransaction.mockReset();
 
   // Restore default $transaction implementation
@@ -253,6 +262,39 @@ describe('NoteService.createNote', () => {
 
     const createArg = mockNote.create.mock.calls[0][0];
     expect(createArg.data.status).toBe('DRAFT');
+  });
+
+  test('auto-links semantically similar notes after the create transaction', async () => {
+    const content = 'No wikilinks here';
+    mockNote.create.mockResolvedValue({ ...baseNote, id: 'note_new' });
+    mockNote.findMany.mockResolvedValue([]); // slug + resolveUnresolved lookups
+    mockLink.findMany.mockResolvedValue([]); // reconcile + autoLink existing-edge lookup
+    mockLink.updateMany.mockResolvedValue({ count: 0 });
+    mockSearchService.search.mockResolvedValue({
+      notes: [
+        { id: 'note_new', rank: 0.9 }, // self — excluded
+        { id: 'sem_1', rank: 0.5 },
+        { id: 'sem_2', rank: 0.005 }, // below threshold — excluded
+      ],
+      nextCursor: null,
+    });
+
+    await NoteService.createNote(userId, { title: 'My Note', content });
+
+    const semanticCall = mockLink.createMany.mock.calls.find((call) =>
+      call[0].data.some((d) => d.source === 'semantic'),
+    );
+    expect(semanticCall).toBeDefined();
+    expect(semanticCall[0].data).toEqual([
+      {
+        fromId: 'note_new',
+        toId: 'sem_1',
+        toTitle: null,
+        relation: 'related-to',
+        weight: 1,
+        source: 'semantic',
+      },
+    ]);
   });
 });
 

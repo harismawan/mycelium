@@ -139,6 +139,44 @@ export const LinkService = {
   },
 
   /**
+   * Create derived (non-wikilink) edges from a note to a set of target notes,
+   * skipping targets already linked from this note and self-references.
+   *
+   * @param {string} noteId - The source note ID.
+   * @param {string[]} targetIds - Candidate target note IDs.
+   * @param {{ relation?: string, source?: string }} [opts]
+   * @returns {Promise<void>}
+   */
+  async autoLink(noteId, targetIds, opts = {}) {
+    const { relation = 'related-to', source = 'semantic' } = opts;
+    if (!Array.isArray(targetIds) || targetIds.length === 0) return;
+
+    const uniqueTargets = [...new Set(targetIds)].filter((id) => id && id !== noteId);
+    if (!uniqueTargets.length) return;
+
+    // Skip any target we already link to (regardless of source) to avoid dupes.
+    const existing = await prisma.link.findMany({
+      where: { fromId: noteId, toId: { in: uniqueTargets } },
+      select: { toId: true },
+    });
+    const existingIds = new Set(existing.map((l) => l.toId));
+    const toCreate = uniqueTargets.filter((id) => !existingIds.has(id));
+    if (!toCreate.length) return;
+
+    await prisma.link.createMany({
+      data: toCreate.map((toId) => ({
+        fromId: noteId,
+        toId,
+        toTitle: null,
+        relation,
+        weight: 1,
+        source,
+      })),
+      skipDuplicates: true,
+    });
+  },
+
+  /**
    * Resolve any existing unresolved links whose `toTitle` matches the given title.
    *
    * Called after creating or updating a note so that previously dangling links

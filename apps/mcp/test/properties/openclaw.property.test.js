@@ -26,7 +26,7 @@ const mockPrisma = {
   $transaction: mock((fn) => fn(mockPrisma)),
 };
 const mockNoteService = {
-  createNote: mock(() => ({})),
+  upsertMemory: mock(() => ({})),
 };
 const mockSearchService = {
   getContext: mock(() => []),
@@ -202,25 +202,17 @@ describe('Feature: mcp-server, Property 9: get_context returns relevant or recen
 });
 
 
-// ─── Property 10: save_memory always includes agent-memory tag and PUBLISHED status ─
+// ─── Property 10: save_memory delegates to upsertMemory and returns its result ─
 // **Validates: Requirements 14.4**
+// The agent-memory tag / PUBLISHED status / dedup invariants now live in the
+// service and are covered by apps/api/test/services/upsert-memory.test.js.
 
-describe('Feature: mcp-server, Property 10: save_memory always includes agent-memory tag and PUBLISHED status', () => {
+describe('Feature: mcp-server, Property 10: save_memory delegates to upsertMemory and returns its result', () => {
   beforeEach(() => {
-    mockPrisma.directory.findFirst.mockReset();
-    mockPrisma.directory.create.mockReset();
-    mockPrisma.directory.findFirst.mockImplementation(() => ({ id: 'memories-dir' }));
-    mockPrisma.directory.create.mockImplementation(() => ({ id: 'memories-dir' }));
-    mockPrisma.note.findMany.mockReset();
-    mockPrisma.note.create.mockReset();
-    mockPrisma.$transaction.mockReset();
-    mockPrisma.$transaction.mockImplementation((fn) => fn(mockPrisma));
-    mockNoteService.createNote.mockReset();
-    mockDirectoryService.findOrCreateMemoriesDirectory.mockReset();
-    mockDirectoryService.findOrCreateMemoriesDirectory.mockImplementation(() => ({ id: 'memories-dir' }));
+    mockNoteService.upsertMemory.mockReset();
   });
 
-  test('tags always include agent-memory, status is always PUBLISHED, no duplicate agent-memory', async () => {
+  test('forwards title, content, and raw tags (no mode) and returns the upsert result verbatim', async () => {
     const arbTagName = fc.stringMatching(/^[a-z][a-z0-9-]{0,10}$/);
     const arbTags = fc.option(
       fc.array(arbTagName, { minLength: 0, maxLength: 5 }),
@@ -233,88 +225,30 @@ describe('Feature: mcp-server, Property 10: save_memory always includes agent-me
         fc.string({ minLength: 1, maxLength: 200 }),
         arbTags,
         async (title, content, tags) => {
-          let capturedData = null;
-          mockDirectoryService.findOrCreateMemoriesDirectory.mockImplementation(() => ({ id: 'memories-dir' }));
-          mockNoteService.createNote.mockImplementation((userId, data) => {
-            capturedData = data;
-            return {
-              id: 'gen-id',
-              slug: 'gen-slug',
-              title: data.title,
-              status: data.status,
-              tags: data.tags.map((name) => ({ name })),
-            };
+          let captured = null;
+          mockNoteService.upsertMemory.mockImplementation((userId, payload) => {
+            captured = { userId, payload };
+            return { id: 'gen-id', slug: 'gen-slug', action: 'created', excerpt: content.slice(0, 200) };
           });
 
           const server = createMockServer();
-          registerSaveMemory(server, { userId: 'u1', scopes: ['notes:write'] });
+          registerSaveMemory(server, { userId: 'u1', scopes: ['notes:write'], apiKeyId: 'k1', apiKeyName: 'cli' });
           const handler = server.getHandler('save_memory');
 
           const result = await handler({ title, content, tags });
           expect(result.isError).toBeUndefined();
 
-          // Verify the create call
-          expect(capturedData).not.toBeNull();
+          // Delegation: exact args forwarded, mode left unset (service defaults to append).
+          expect(captured).not.toBeNull();
+          expect(captured.userId).toBe('u1');
+          expect(captured.payload.title).toBe(title);
+          expect(captured.payload.content).toBe(content);
+          expect(captured.payload.tags).toEqual(tags);
+          expect(captured.payload.mode).toBeUndefined();
 
-          // Status is always PUBLISHED
-          expect(capturedData.status).toBe('PUBLISHED');
-          expect(capturedData.directoryId).toBe('memories-dir');
-
-          // Tags always include agent-memory
-          const tagNames = capturedData.tags;
-          expect(tagNames).toContain('agent-memory');
-
-          // No duplicate agent-memory tags
-          const agentMemoryCount = tagNames.filter((n) => n === 'agent-memory').length;
-          expect(agentMemoryCount).toBe(1);
-
-          // All user-provided tags are preserved
-          if (tags) {
-            for (const tag of tags) {
-              if (tag !== 'agent-memory') {
-                expect(tagNames).toContain(tag);
-              }
-            }
-          }
-        },
-      ),
-      { numRuns: 100 },
-    );
-  });
-
-  test('agent-memory is deduplicated when user explicitly provides it', async () => {
-    await fc.assert(
-      fc.asyncProperty(
-        arbAlpha,
-        fc.string({ minLength: 1, maxLength: 100 }),
-        fc.array(fc.stringMatching(/^[a-z][a-z0-9-]{0,10}$/), { minLength: 0, maxLength: 4 }),
-        async (title, content, extraTags) => {
-          // Always include agent-memory in user tags
-          const userTags = ['agent-memory', ...extraTags];
-
-          let capturedData = null;
-          mockDirectoryService.findOrCreateMemoriesDirectory.mockImplementation(() => ({ id: 'memories-dir' }));
-          mockNoteService.createNote.mockImplementation((userId, data) => {
-            capturedData = data;
-            return {
-              id: 'gen-id',
-              slug: 'gen-slug',
-              title: data.title,
-              status: data.status,
-              tags: data.tags.map((name) => ({ name })),
-            };
-          });
-
-          const server = createMockServer();
-          registerSaveMemory(server, { userId: 'u1', scopes: ['notes:write'] });
-          const handler = server.getHandler('save_memory');
-
-          const result = await handler({ title, content, tags: userTags });
-          expect(result.isError).toBeUndefined();
-
-          const tagNames = capturedData.tags;
-          const agentMemoryCount = tagNames.filter((n) => n === 'agent-memory').length;
-          expect(agentMemoryCount).toBe(1);
+          // Return shape is the service payload verbatim.
+          const parsed = JSON.parse(result.content[0].text);
+          expect(Object.keys(parsed).sort()).toEqual(['action', 'excerpt', 'id', 'slug']);
         },
       ),
       { numRuns: 100 },

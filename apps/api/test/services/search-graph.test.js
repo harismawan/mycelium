@@ -1,5 +1,5 @@
 import { describe, test, expect, mock, beforeEach } from 'bun:test';
-import { MAX_GRAPH_NODES, MAX_GRAPH_DEPTH } from '@mycelium/shared';
+import { GRAPH_DECAY, MAX_GRAPH_NODES, MAX_GRAPH_DEPTH } from '@mycelium/shared';
 
 // ---------------------------------------------------------------------------
 // Mock setup — must happen before any import that touches Prisma
@@ -352,30 +352,40 @@ describe('LinkService.getGraph — full graph', () => {
 // LinkService.getGraph — ego-subgraph
 // ===========================================================================
 describe('LinkService.getGraph — ego-subgraph', () => {
-  /** Validates: Requirements 7.2 */
-  test('returns subgraph with depth=1', async () => {
+  /** Validates: Requirements 7.2, 10.1, 10.2 */
+  test('returns subgraph with depth=1 annotated with hop and decayed score', async () => {
     const startNote = { id: 'n1', slug: 'center', title: 'Center', status: 'PUBLISHED' };
     const neighborNote = { id: 'n2', slug: 'neighbor', title: 'Neighbor', status: 'DRAFT' };
+    const edgeCreatedAt = new Date('2026-01-01T00:00:00.000Z');
 
-    // findFirst returns the start note
     mockNote.findFirst.mockResolvedValue(startNote);
 
-    // BFS depth 1: outgoing links from n1
     mockLink.findMany
-      .mockResolvedValueOnce([{ fromId: 'n1', toId: 'n2', relation: null }])  // outLinks
-      .mockResolvedValueOnce([]);  // inLinks
+      .mockResolvedValueOnce([
+        { fromId: 'n1', toId: 'n2', relation: null, weight: 1, createdAt: edgeCreatedAt },
+      ]) // outLinks
+      .mockResolvedValueOnce([]); // inLinks
 
-    // Neighbor notes fetched
     mockNote.findMany.mockResolvedValue([neighborNote]);
 
     const graph = await LinkService.getGraph(userId, { slug: 'center', depth: 1 });
 
     expect(graph.nodes).toHaveLength(2);
-    const nodeIds = graph.nodes.map((n) => n.id);
-    expect(nodeIds).toContain('n1');
-    expect(nodeIds).toContain('n2');
+    const center = graph.nodes.find((n) => n.id === 'n1');
+    const neighbor = graph.nodes.find((n) => n.id === 'n2');
+    expect(center.hop).toBe(0);
+    expect(neighbor.hop).toBe(1);
+    // score = weight(1) * GRAPH_DECAY ** hop(1)
+    expect(neighbor.score).toBeCloseTo(GRAPH_DECAY ** 1);
+    // the ego center always ranks first
+    expect(graph.nodes[0].id).toBe('n1');
     expect(graph.edges).toHaveLength(1);
-    expect(graph.edges[0]).toEqual({ fromId: 'n1', toId: 'n2', relation: null, weight: 1 });
+    expect(graph.edges[0]).toEqual({
+      fromId: 'n1',
+      toId: 'n2',
+      relation: null,
+      createdAt: edgeCreatedAt,
+    });
   });
 
   test('returns empty graph when start note not found', async () => {
@@ -815,5 +825,107 @@ describe('SearchService.getContext — expand', () => {
     const out = await SearchService.getContext(userId, { topic: 'nope', expand: true });
     expect(out).toEqual([]);
     expect(mockLink.findMany).not.toHaveBeenCalled();
+  });
+});
+
+// ===========================================================================
+// LinkService.getGraph — ego-subgraph ranking, decay, direction & cap (R10)
+// ===========================================================================
+describe('LinkService.getGraph — ego ranking & decay (R10)', () => {
+  /** Validates: Requirements 10.1, 10.2 */
+  test('accumulates score across multiple paths and assigns deeper hops', async () => {
+    const n1 = { id: 'n1', slug: 'a', title: 'A', status: 'PUBLISHED' };
+    const n2 = { id: 'n2', slug: 'b', title: 'B', status: 'PUBLISHED' };
+    const n3 = { id: 'n3', slug: 'c', title: 'C', status: 'PUBLISHED' };
+    const n4 = { id: 'n4', slug: 'd', title: 'D', status: 'PUBLISHED' };
+    const at = new Date('2026-02-02T00:00:00.000Z');
+
+    mockNote.findFirst.mockResolvedValue(n1);
+
+    mockLink.findMany
+      // level 0 (frontier [n1]): out, in
+      .mockResolvedValueOnce([
+        { fromId: 'n1', toId: 'n2', relation: null, weight: 1, createdAt: at },
+        { fromId: 'n1', toId: 'n3', relation: null, weight: 1, createdAt: at },
+      ])
+      .mockResolvedValueOnce([])
+      // level 1 (frontier [n2, n3]): out, in
+      .mockResolvedValueOnce([
+        { fromId: 'n2', toId: 'n4', relation: null, weight: 1, createdAt: at },
+        { fromId: 'n3', toId: 'n4', relation: null, weight: 1, createdAt: at },
+      ])
+      .mockResolvedValueOnce([]);
+
+    mockNote.findMany
+      .mockResolvedValueOnce([n2, n3]) // level 0 neighbors
+      .mockResolvedValueOnce([n4]); // level 1 neighbors
+
+    const graph = await LinkService.getGraph(userId, { slug: 'a', depth: 2 });
+
+    const node4 = graph.nodes.find((n) => n.id === 'n4');
+    expect(node4.hop).toBe(2);
+    // two paths (n2->n4 and n3->n4), each contributing weight(1) * GRAPH_DECAY ** 2
+    expect(node4.score).toBeCloseTo(2 * GRAPH_DECAY ** 2);
+  });
+
+  /** Validates: Requirements 10.3 */
+  test('direction "out" follows only outgoing edges (single link query per level)', async () => {
+    const n1 = { id: 'n1', slug: 'a', title: 'A', status: 'PUBLISHED' };
+    const n2 = { id: 'n2', slug: 'b', title: 'B', status: 'PUBLISHED' };
+    const at = new Date('2026-03-03T00:00:00.000Z');
+
+    mockNote.findFirst.mockResolvedValue(n1);
+    // Only the outgoing query runs; the incoming side resolves to [] without hitting the mock.
+    mockLink.findMany.mockResolvedValueOnce([
+      { fromId: 'n1', toId: 'n2', relation: null, weight: 1, createdAt: at },
+    ]);
+    mockNote.findMany.mockResolvedValue([n2]);
+
+    const graph = await LinkService.getGraph(userId, { slug: 'a', depth: 1, direction: 'out' });
+
+    expect(mockLink.findMany).toHaveBeenCalledTimes(1);
+    expect(graph.nodes.map((n) => n.id).sort()).toEqual(['n1', 'n2']);
+  });
+
+  /** Validates: Requirements 10.1 (+ R5 node cap / truncated) */
+  test('ranks by score and trims to MAX_GRAPH_NODES while keeping the ego center', async () => {
+    const center = { id: 'n0', slug: 'center', title: 'Center', status: 'PUBLISHED' };
+    const at = new Date('2026-04-04T00:00:00.000Z');
+
+    // MAX_GRAPH_NODES + 1 distinct one-hop neighbors → the cap must drop some.
+    const neighbors = Array.from({ length: MAX_GRAPH_NODES + 1 }, (_, i) => ({
+      id: `m${i}`,
+      slug: `m-${i}`,
+      title: `M${i}`,
+      status: 'PUBLISHED',
+    }));
+    const outLinks = neighbors.map((m) => ({
+      fromId: 'n0',
+      toId: m.id,
+      relation: null,
+      weight: 1,
+      createdAt: at,
+    }));
+
+    mockNote.findFirst.mockResolvedValue(center);
+    mockLink.findMany
+      .mockResolvedValueOnce(outLinks) // outLinks
+      .mockResolvedValueOnce([]); // inLinks
+    mockNote.findMany.mockResolvedValue(neighbors);
+
+    const graph = await LinkService.getGraph(userId, { slug: 'center', depth: 1 });
+
+    expect(graph.nodes).toHaveLength(MAX_GRAPH_NODES);
+    expect(graph.truncated).toBe(true);
+    // ego center is always retained even though many neighbors tie on score
+    expect(graph.nodes.some((n) => n.id === 'n0')).toBe(true);
+    // no dangling edges: every surviving edge connects two retained nodes
+    const keptIds = new Set(graph.nodes.map((n) => n.id));
+    for (const e of graph.edges) {
+      expect(keptIds.has(e.fromId)).toBe(true);
+      expect(keptIds.has(e.toId)).toBe(true);
+    }
+    // center + (MAX-1) neighbors kept ⇒ MAX-1 surviving edges
+    expect(graph.edges).toHaveLength(MAX_GRAPH_NODES - 1);
   });
 });

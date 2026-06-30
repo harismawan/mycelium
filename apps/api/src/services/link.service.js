@@ -1,5 +1,5 @@
 import { prisma } from '../db.js';
-import { MAX_GRAPH_NODES, MAX_GRAPH_DEPTH, MAX_LINK_RESULTS } from '@mycelium/shared';
+import { GRAPH_DECAY, MAX_GRAPH_NODES, MAX_GRAPH_DEPTH, MAX_LINK_RESULTS } from '@mycelium/shared';
 
 /**
  * Record that `candidateId` is directly linked to `seedId` in a
@@ -328,20 +328,20 @@ export const LinkService = {
    * ARCHIVED notes are excluded by default.
    *
    * @param {string} userId - The owning user's ID.
-   * @param {{ slug?: string, depth?: number }} [opts={}] - Options.
-   * @returns {Promise<{ nodes: GraphNode[], edges: GraphEdge[] }>}
+   * @param {{ slug?: string, depth?: number, direction?: 'out'|'in'|'both' }} [opts={}] - Options.
+   * @returns {Promise<{ nodes: GraphNode[], edges: GraphEdge[], truncated: boolean }>}
    *
-   * Validates: Requirements 7.1, 7.2, 7.3
+   * Validates: Requirements 7.1, 7.2, 7.3, 10.1, 10.2, 10.3
    */
   async getGraph(userId, opts = {}) {
-    const { slug } = opts;
+    const { slug, direction = 'both' } = opts;
     const depth = clampDepth(opts.depth);
 
     if (!slug) {
       return this._getFullGraph(userId);
     }
 
-    return this._getEgoSubgraph(userId, slug, depth);
+    return this._getEgoSubgraph(userId, slug, depth, direction);
   },
 
   /**
@@ -388,16 +388,29 @@ export const LinkService = {
   },
 
   /**
-   * Return an ego-subgraph starting from a note, traversing links up to
-   * `depth` levels via BFS (following both outgoing and incoming links).
+   * Return a ranked ego-subgraph starting from a note, traversing links up to
+   * `depth` levels via BFS.
+   *
+   * Each reached node is annotated with:
+   *  - `hop`   — BFS distance from the ego center (center = 0)
+   *  - `score` — distance-decayed relevance, accumulated across paths as
+   *              `Σ edgeWeight * GRAPH_DECAY ** hop`. When `Link.weight` is
+   *              absent (pre-R7) every edge weighs 1, so the score degrades to
+   *              `GRAPH_DECAY ** hop * pathCount`.
+   *
+   * Nodes are returned sorted by `score` (descending, center pinned first) and
+   * capped to `MAX_GRAPH_NODES` (R5 cap); `truncated` is true when the cap drops
+   * nodes. Edges left dangling by the cap are removed. Edges carry `createdAt`
+   * for temporal ordering.
    *
    * @param {string} userId
    * @param {string} slug
    * @param {number} depth
-   * @returns {Promise<{ nodes: GraphNode[], edges: GraphEdge[] }>}
+   * @param {'out'|'in'|'both'} [direction='both'] - Which edge directions to follow.
+   * @returns {Promise<{ nodes: Array<GraphNode & { hop: number, score: number }>, edges: Array<GraphEdge & { createdAt: Date }>, truncated: boolean }>}
    * @private
    */
-  async _getEgoSubgraph(userId, slug, depth) {
+  async _getEgoSubgraph(userId, slug, depth, direction = 'both') {
     const startNote = await prisma.note.findFirst({
       where: { slug, userId, status: { not: 'ARCHIVED' } },
       select: { id: true, slug: true, title: true, status: true },
@@ -407,53 +420,67 @@ export const LinkService = {
       return { nodes: [], edges: [], truncated: false };
     }
 
-    /** @type {Map<string, GraphNode>} */
+    /** @type {Map<string, GraphNode & { hop: number, score: number }>} */
     const visited = new Map();
-    visited.set(startNote.id, startNote);
+    visited.set(startNote.id, { ...startNote, hop: 0, score: 1 });
 
-    /** @type {GraphEdge[]} */
+    /** @type {Array<GraphEdge & { createdAt: Date }>} */
     const edges = [];
     const edgeSet = new Set();
 
     let frontier = [startNote.id];
 
     for (let d = 0; d < depth && frontier.length > 0; d++) {
-      // Fetch outgoing and incoming links for the current frontier
+      const frontierSet = new Set(frontier);
+
+      // Follow outgoing and/or incoming links from the current frontier.
       const [outLinks, inLinks] = await Promise.all([
-        prisma.link.findMany({
-          where: { fromId: { in: frontier }, toId: { not: null } },
-          select: { fromId: true, toId: true, relation: true, weight: true },
-        }),
-        prisma.link.findMany({
-          where: { toId: { in: frontier }, fromId: { not: undefined } },
-          select: { fromId: true, toId: true, relation: true, weight: true },
-        }),
+        direction === 'in'
+          ? Promise.resolve([])
+          : prisma.link.findMany({
+              where: { fromId: { in: frontier }, toId: { not: null } },
+              select: { fromId: true, toId: true, relation: true, weight: true, createdAt: true },
+            }),
+        direction === 'out'
+          ? Promise.resolve([])
+          : prisma.link.findMany({
+              where: { toId: { in: frontier } },
+              select: { fromId: true, toId: true, relation: true, weight: true, createdAt: true },
+            }),
       ]);
 
-      const neighborIds = new Set();
+      // Score contributions for nodes first discovered at this level (hop d+1).
+      const levelScore = new Map();
 
       for (const link of [...outLinks, ...inLinks]) {
-        const edgeKey = `${link.fromId}->${link.toId}::${link.relation ?? ''}`;
+        // Dedup edges on direction + relation (relation matters once R7 types edges).
+        const edgeKey = `${link.fromId}->${link.toId}:${link.relation ?? ''}`;
         if (!edgeSet.has(edgeKey)) {
           edgeSet.add(edgeKey);
           edges.push({
             fromId: link.fromId,
             toId: link.toId,
             relation: link.relation ?? null,
-            weight: link.weight ?? 1,
+            createdAt: link.createdAt,
           });
         }
 
-        if (!visited.has(link.toId)) neighborIds.add(link.toId);
-        if (!visited.has(link.fromId)) neighborIds.add(link.fromId);
+        // The neighbor is the endpoint that is NOT in the current frontier.
+        const neighborId = frontierSet.has(link.fromId) ? link.toId : link.fromId;
+        if (!neighborId || visited.has(neighborId)) continue;
+
+        // score = edgeWeight * GRAPH_DECAY ** hop ; weight defaults to 1 pre-R7.
+        const contribution = (link.weight ?? 1) * GRAPH_DECAY ** (d + 1);
+        levelScore.set(neighborId, (levelScore.get(neighborId) ?? 0) + contribution);
       }
 
-      if (!neighborIds.size) break;
+      const neighborIds = [...levelScore.keys()];
+      if (!neighborIds.length) break;
 
-      // Fetch neighbor notes, excluding ARCHIVED
+      // Fetch neighbor notes, excluding ARCHIVED.
       const neighborNotes = await prisma.note.findMany({
         where: {
-          id: { in: [...neighborIds] },
+          id: { in: neighborIds },
           userId,
           status: { not: 'ARCHIVED' },
         },
@@ -463,23 +490,28 @@ export const LinkService = {
       frontier = [];
       for (const note of neighborNotes) {
         if (!visited.has(note.id)) {
-          visited.set(note.id, note);
+          visited.set(note.id, { ...note, hop: d + 1, score: levelScore.get(note.id) ?? 0 });
           frontier.push(note.id);
         }
       }
     }
 
-    // Cap to MAX_GRAPH_NODES; the visited Map preserves BFS insertion order, so the
-    // start node and nearest neighbors survive the cap.
+    // Rank by score (desc), pin the ego center first, then cap to MAX_GRAPH_NODES.
     const allNodes = [...visited.values()];
-    const truncated = allNodes.length > MAX_GRAPH_NODES;
-    const nodes = truncated ? allNodes.slice(0, MAX_GRAPH_NODES) : allNodes;
+    const center = allNodes.find((n) => n.id === startNote.id);
+    const rest = allNodes
+      .filter((n) => n.id !== startNote.id)
+      .sort((a, b) => b.score - a.score || a.hop - b.hop || a.id.localeCompare(b.id));
+    const ranked = [center, ...rest];
+    const truncated = ranked.length > MAX_GRAPH_NODES;
+    const rankedNodes = ranked.slice(0, MAX_GRAPH_NODES);
+    const keptIds = new Set(rankedNodes.map((n) => n.id));
 
-    // Re-derive the surviving id set, then keep only edges with both endpoints present.
-    const keptIds = new Set(nodes.map((n) => n.id));
+    // Drop edges whose endpoints didn't survive the cap (or were never visited,
+    // e.g. links to ARCHIVED neighbors that findMany excluded).
     const validEdges = edges.filter((e) => keptIds.has(e.fromId) && keptIds.has(e.toId));
 
-    return { nodes, edges: validEdges, truncated };
+    return { nodes: rankedNodes, edges: validEdges, truncated };
   },
 
   /**

@@ -31,9 +31,12 @@ export const NoteService = {
    *
    * @param {string} userId - ID of the owning user.
    * @param {{ title: string, content: string, status?: string, tags?: string[], directoryId?: string | null, authType?: string, apiKeyId?: string, apiKeyName?: string, metadata?: { source?: string, confidence?: number, importance?: number } }} data
+   * @param {{ tx?: import('@prisma/client').Prisma.TransactionClient, reservedSlugs?: Set<string> }} [opts={}] - Inject `tx` to run inside an existing transaction (batch path); pass `reservedSlugs` to dedup slugs against other in-flight items.
    * @returns {Promise<import('@prisma/client').Note>} The created note with tags.
    */
-  async createNote(userId, data) {
+  async createNote(userId, data, opts = {}) {
+    const db = opts.tx ?? prisma;
+    const { reservedSlugs } = opts;
     const { title, status, tags, directoryId, authType, apiKeyId, apiKeyName } = data;
     const meta = normalizeMetadata(data.metadata);
     const content = sanitizeMarkdown(data.content);
@@ -41,19 +44,25 @@ export const NoteService = {
     const excerpt = generateExcerpt(content);
     const wikilinks = extractWikilinks(content);
 
-    // Generate a unique slug
+    // Generate a unique slug. Read through `db` so that, inside a batch
+    // transaction, earlier in-flight writes are visible; also dedup against
+    // slugs already handed out in this batch via `reservedSlugs`.
     const baseSlug = slugify(title);
-    const existing = await prisma.note.findMany({
+    const existing = await db.note.findMany({
       where: { slug: { startsWith: baseSlug } },
       select: { slug: true },
     });
-    const existingSlugs = new Set(existing.map((n) => n.slug));
+    const taken = new Set(existing.map((n) => n.slug));
+    if (reservedSlugs) {
+      for (const s of reservedSlugs) taken.add(s);
+    }
     let slug = baseSlug;
-    if (existingSlugs.has(slug)) {
+    if (taken.has(slug)) {
       let counter = 1;
-      while (existingSlugs.has(`${slug}-${counter}`)) counter++;
+      while (taken.has(`${slug}-${counter}`)) counter++;
       slug = `${slug}-${counter}`;
     }
+    if (reservedSlugs) reservedSlugs.add(slug);
 
     // Build tag connect-or-create operations
     const tagOps = (tags ?? []).map((name) => ({
@@ -62,7 +71,7 @@ export const NoteService = {
     }));
 
     if (directoryId) {
-      const directory = await prisma.directory.findFirst({
+      const directory = await db.directory.findFirst({
         where: { id: directoryId, userId },
         select: { id: true },
       });
@@ -71,7 +80,9 @@ export const NoteService = {
       }
     }
 
-    const note = await prisma.$transaction(async (tx) => {
+    // The write body, runnable against either an injected transaction client
+    // or one we open ourselves.
+    const runWrite = async (tx) => {
       const created = await tx.note.create({
         data: {
           title,
@@ -103,7 +114,16 @@ export const NoteService = {
       await resolveUnresolvedLinks(tx, created.id, title, userId);
 
       return created;
-    });
+    };
+
+    // Batch path injects a tx: run inline so all items commit atomically.
+    // Auto-linking is deferred to the batch caller in this case.
+    if (opts.tx) {
+      return runWrite(opts.tx);
+    }
+
+    // Standalone path opens its own transaction (unchanged behavior).
+    const note = await prisma.$transaction(runWrite);
 
     // Best-effort semantic auto-linking, outside the write transaction.
     await autoLinkSemantic(userId, note.id, title);

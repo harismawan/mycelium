@@ -330,6 +330,48 @@ describe('NoteService.createNote', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// createNote — injected transaction + shared slug reservation (R12.1)
+// ---------------------------------------------------------------------------
+describe('NoteService.createNote with injected tx', () => {
+  test('does not open a nested transaction and writes through the injected tx', async () => {
+    mockNote.findMany.mockResolvedValue([]); // slug lookup -> no collisions
+    mockLink.findMany.mockResolvedValue([]);
+    mockLink.updateMany.mockResolvedValue({ count: 0 });
+    mockNote.create.mockResolvedValue({ ...baseNote, id: 'note_tx', slug: 'my-note' });
+
+    const tx = { note: mockNote, link: mockLink, directory: mockDirectory };
+
+    const result = await NoteService.createNote(
+      userId,
+      { title: 'My Note', content: 'body' },
+      { tx },
+    );
+
+    // The whole point: no inner $transaction is opened when one is injected.
+    expect(mockTransaction).not.toHaveBeenCalled();
+    expect(mockNote.create).toHaveBeenCalledTimes(1);
+    expect(result.id).toBe('note_tx');
+  });
+
+  test('reservedSlugs dedups across in-flight items with no extra DB hit', async () => {
+    mockNote.findMany.mockResolvedValue([]); // DB reports no collisions for either call
+    mockLink.findMany.mockResolvedValue([]);
+    mockLink.updateMany.mockResolvedValue({ count: 0 });
+    mockNote.create.mockResolvedValue({ ...baseNote });
+
+    const tx = { note: mockNote, link: mockLink, directory: mockDirectory };
+    const reservedSlugs = new Set();
+
+    await NoteService.createNote(userId, { title: 'My Note', content: 'a' }, { tx, reservedSlugs });
+    await NoteService.createNote(userId, { title: 'My Note', content: 'b' }, { tx, reservedSlugs });
+
+    expect(mockNote.create.mock.calls[0][0].data.slug).toBe('my-note');
+    expect(mockNote.create.mock.calls[1][0].data.slug).toBe('my-note-1');
+    expect(reservedSlugs.has('my-note')).toBe(true);
+    expect(reservedSlugs.has('my-note-1')).toBe(true);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // listNotes

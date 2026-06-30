@@ -30,11 +30,12 @@ export const NoteService = {
    * resolve unresolved links.
    *
    * @param {string} userId - ID of the owning user.
-   * @param {{ title: string, content: string, status?: string, tags?: string[], directoryId?: string | null, authType?: string, apiKeyId?: string, apiKeyName?: string }} data
+   * @param {{ title: string, content: string, status?: string, tags?: string[], directoryId?: string | null, authType?: string, apiKeyId?: string, apiKeyName?: string, metadata?: { source?: string, confidence?: number, importance?: number } }} data
    * @returns {Promise<import('@prisma/client').Note>} The created note with tags.
    */
   async createNote(userId, data) {
     const { title, status, tags, directoryId, authType, apiKeyId, apiKeyName } = data;
+    const meta = normalizeMetadata(data.metadata);
     const content = sanitizeMarkdown(data.content);
     const { frontmatter } = parseFrontmatter(content);
     const excerpt = generateExcerpt(content);
@@ -81,6 +82,7 @@ export const NoteService = {
           status: status ?? 'DRAFT',
           userId,
           directoryId: directoryId ?? null,
+          ...meta,
           tags: tagOps.length ? { connectOrCreate: tagOps } : undefined,
           revisions: {
             create: {
@@ -298,7 +300,7 @@ export const NoteService = {
    *
    * @param {string} userId - ID of the owning user.
    * @param {string} slug - Current note slug.
-   * @param {{ title?: string, content?: string, status?: string, tags?: string[], directoryId?: string | null, message?: string, pinned?: boolean, authType?: string, apiKeyId?: string, apiKeyName?: string }} data
+   * @param {{ title?: string, content?: string, status?: string, tags?: string[], directoryId?: string | null, message?: string, pinned?: boolean, authType?: string, apiKeyId?: string, apiKeyName?: string, metadata?: { source?: string, confidence?: number, importance?: number } }} data
    * @returns {Promise<{ note: import('@prisma/client').Note, before: { title: string, status: string, tags: string[], content: string } }>}
    * @throws {{ statusCode: number, message: string }} 404 if not found.
    */
@@ -317,6 +319,7 @@ export const NoteService = {
     const tags = data.tags;
     const message = data.message;
     const { authType, apiKeyId, apiKeyName } = data;
+    const meta = normalizeMetadata(data.metadata);
 
     if (data.directoryId) {
       const directory = await prisma.directory.findFirst({
@@ -367,6 +370,7 @@ export const NoteService = {
       status,
       ...(data.pinned !== undefined && { pinned: data.pinned }),
       ...(Object.hasOwn(data, 'directoryId') && { directoryId: data.directoryId }),
+      ...meta,
     };
 
     // Handle tags: disconnect all existing, then connect-or-create new ones
@@ -521,6 +525,35 @@ export const NoteService = {
     return { title: note.title };
   },
 };
+
+/**
+ * Normalize and clamp agent-supplied memory metadata.
+ *
+ * Returns ONLY the keys that were supplied (and finite), so callers can spread
+ * the result into a Prisma create/update without overwriting existing values
+ * with nulls. `confidence` is clamped to [0, 1]; `importance` to an integer in
+ * [1, 5]. `importance` is agent-supplied and gameable, hence the hard clamp.
+ *
+ * @param {{ source?: string|null, confidence?: number|null, importance?: number|null } | undefined} metadata
+ * @returns {{ source?: string, confidence?: number, importance?: number }}
+ */
+function normalizeMetadata(metadata) {
+  if (!metadata || typeof metadata !== 'object') return {};
+  /** @type {{ source?: string, confidence?: number, importance?: number }} */
+  const out = {};
+  if (metadata.source !== undefined && metadata.source !== null) {
+    out.source = String(metadata.source);
+  }
+  if (metadata.confidence !== undefined && metadata.confidence !== null) {
+    const c = Number(metadata.confidence);
+    if (Number.isFinite(c)) out.confidence = Math.min(1, Math.max(0, c));
+  }
+  if (metadata.importance !== undefined && metadata.importance !== null) {
+    const i = Number(metadata.importance);
+    if (Number.isFinite(i)) out.importance = Math.min(5, Math.max(1, Math.round(i)));
+  }
+  return out;
+}
 
 /**
  * Resolve any existing unresolved links whose `toTitle` matches the given title.

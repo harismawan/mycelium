@@ -296,6 +296,38 @@ describe('NoteService.createNote', () => {
       },
     ]);
   });
+
+  test('persists clamped memory metadata (source/confidence/importance)', async () => {
+    mockNote.create.mockResolvedValue({ ...baseNote });
+    mockNote.findMany.mockResolvedValue([]);
+    mockLink.findMany.mockResolvedValue([]);
+    mockLink.updateMany.mockResolvedValue({ count: 0 });
+
+    await NoteService.createNote(userId, {
+      title: 'My Note',
+      content: 'Hello',
+      metadata: { source: 'session:abc', confidence: 1.7, importance: 9 },
+    });
+
+    const createArg = mockNote.create.mock.calls[0][0];
+    expect(createArg.data.source).toBe('session:abc');
+    expect(createArg.data.confidence).toBe(1); // clamped to [0,1]
+    expect(createArg.data.importance).toBe(5); // clamped to [1,5]
+  });
+
+  test('omits metadata keys that were not provided on create', async () => {
+    mockNote.create.mockResolvedValue({ ...baseNote });
+    mockNote.findMany.mockResolvedValue([]);
+    mockLink.findMany.mockResolvedValue([]);
+    mockLink.updateMany.mockResolvedValue({ count: 0 });
+
+    await NoteService.createNote(userId, { title: 'My Note', content: 'Hello' });
+
+    const createArg = mockNote.create.mock.calls[0][0];
+    expect('source' in createArg.data).toBe(false);
+    expect('confidence' in createArg.data).toBe(false);
+    expect('importance' in createArg.data).toBe(false);
+  });
 });
 
 
@@ -584,6 +616,24 @@ describe('NoteService.updateNote', () => {
 
     await expect(NoteService.updateNote(userId, 'my-note', { directoryId: 'other_dir' }))
       .rejects.toMatchObject({ statusCode: 404, message: 'Directory not found' });
+  });
+
+  test('updates only the provided metadata fields', async () => {
+    mockNote.findFirst.mockResolvedValue({ ...baseNote });
+    mockNote.findMany.mockResolvedValue([]);
+    mockNote.update.mockResolvedValue({ ...baseNote });
+    mockLink.findMany.mockResolvedValue([]);
+    mockLink.updateMany.mockResolvedValue({ count: 0 });
+
+    await NoteService.updateNote(userId, 'my-note', {
+      content: 'Updated body',
+      metadata: { importance: 4 },
+    });
+
+    const updateArg = mockNote.update.mock.calls[0][0];
+    expect(updateArg.data.importance).toBe(4);
+    expect('source' in updateArg.data).toBe(false);
+    expect('confidence' in updateArg.data).toBe(false);
   });
 });
 

@@ -922,6 +922,7 @@ describe('NoteService.createMemories', () => {
   });
 
   test('delegates to upsertMemory when present, forwarding the shared tx', async () => {
+    const originalUpsert = NoteService.upsertMemory;
     const upsert = mock(async () => ({ id: 'up1', slug: 'consolidated', action: 'updated', excerpt: 'x' }));
     NoteService.upsertMemory = upsert;
     try {
@@ -939,7 +940,7 @@ describe('NoteService.createMemories', () => {
         index: 0, id: 'up1', slug: 'consolidated', action: 'updated', error: null,
       });
     } finally {
-      delete NoteService.upsertMemory;
+      NoteService.upsertMemory = originalUpsert;
     }
   });
 });

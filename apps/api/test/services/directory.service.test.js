@@ -121,3 +121,33 @@ describe('DirectoryService.deleteDirectory', () => {
       .rejects.toMatchObject({ statusCode: 409, message: 'Directory is not empty' });
   });
 });
+
+describe('DirectoryService.findOrCreateMemoryNamespace', () => {
+  test('returns the existing namespace dir under the memories root', async () => {
+    mockDirectory.findFirst
+      .mockResolvedValueOnce({ id: 'mem-root' })  // memories root exists
+      .mockResolvedValueOnce({ id: 'ns-key-A' }); // memories/key-A exists
+
+    const res = await DirectoryService.findOrCreateMemoryNamespace(userId, 'key-A');
+
+    expect(res).toEqual({ id: 'ns-key-A' });
+    expect(mockDirectory.create).not.toHaveBeenCalled();
+  });
+
+  test('creates the memories root and namespace child when missing', async () => {
+    mockDirectory.findFirst.mockResolvedValue(null); // nothing exists
+    mockDirectory.create
+      .mockResolvedValueOnce({ id: 'mem-root' })  // create memories root
+      .mockResolvedValueOnce({ id: 'ns-key-A' }); // create memories/key-A
+
+    const res = await DirectoryService.findOrCreateMemoryNamespace(userId, 'key-A');
+
+    expect(res).toEqual({ id: 'ns-key-A' });
+    expect(mockDirectory.create).toHaveBeenCalledTimes(2);
+    expect(mockDirectory.create.mock.calls[1][0].data).toEqual({
+      name: 'key-A',
+      parentId: 'mem-root',
+      userId,
+    });
+  });
+});

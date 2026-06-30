@@ -5,10 +5,20 @@ import {
   generateExcerpt,
   slugify,
   DEFAULT_PAGE_LIMIT,
+  FORGET_STALE_DEFAULT_DAYS,
+  FORGET_MIN_IMPORTANCE,
 } from '@mycelium/shared';
 import { prisma } from '../db.js';
 import { LinkService } from './link.service.js';
+import { embedText } from './embedding.service.js';
+import { SearchService } from './search.service.js';
+import { DirectoryService } from './directory.service.js';
 import { sanitizeMarkdown } from '../utils/sanitize.js';
+
+/** Max number of semantic auto-link edges created per new note. */
+const AUTO_LINK_TOP_K = 5;
+/** Minimum `ts_rank` a candidate must reach to be auto-linked. */
+const AUTO_LINK_MIN_RANK = 0.01;
 
 /**
  * Note service handling CRUD operations, the Markdown save pipeline,
@@ -23,29 +33,44 @@ export const NoteService = {
    * resolve unresolved links.
    *
    * @param {string} userId - ID of the owning user.
-   * @param {{ title: string, content: string, status?: string, tags?: string[], directoryId?: string | null, authType?: string, apiKeyId?: string, apiKeyName?: string }} data
+   * @param {{ title: string, content: string, status?: string, tags?: string[], directoryId?: string | null, authType?: string, apiKeyId?: string, apiKeyName?: string, metadata?: { source?: string, confidence?: number, importance?: number } }} data
+   * @param {{ tx?: import('@prisma/client').Prisma.TransactionClient, reservedSlugs?: Set<string> }} [opts={}] - Inject `tx` to run inside an existing transaction (batch path); pass `reservedSlugs` to dedup slugs against other in-flight items.
    * @returns {Promise<import('@prisma/client').Note>} The created note with tags.
    */
-  async createNote(userId, data) {
+  async createNote(userId, data, opts = {}) {
+    const db = opts.tx ?? prisma;
+    const { reservedSlugs } = opts;
     const { title, status, tags, directoryId, authType, apiKeyId, apiKeyName } = data;
+    const meta = normalizeMetadata(data.metadata);
     const content = sanitizeMarkdown(data.content);
     const { frontmatter } = parseFrontmatter(content);
     const excerpt = generateExcerpt(content);
     const wikilinks = extractWikilinks(content);
 
-    // Generate a unique slug
+    // Compute the embedding OUTSIDE the transaction so an external embeddings
+    // HTTP call never holds a DB transaction open. null => arm disabled / failed.
+    // Skip on the batch (injected-tx) path — the result would be discarded anyway.
+    const embedding = opts.tx ? null : await embedText(`${title}\n\n${content}`);
+
+    // Generate a unique slug. Read through `db` so that, inside a batch
+    // transaction, earlier in-flight writes are visible; also dedup against
+    // slugs already handed out in this batch via `reservedSlugs`.
     const baseSlug = slugify(title);
-    const existing = await prisma.note.findMany({
+    const existing = await db.note.findMany({
       where: { slug: { startsWith: baseSlug } },
       select: { slug: true },
     });
-    const existingSlugs = new Set(existing.map((n) => n.slug));
+    const taken = new Set(existing.map((n) => n.slug));
+    if (reservedSlugs) {
+      for (const s of reservedSlugs) taken.add(s);
+    }
     let slug = baseSlug;
-    if (existingSlugs.has(slug)) {
+    if (taken.has(slug)) {
       let counter = 1;
-      while (existingSlugs.has(`${slug}-${counter}`)) counter++;
+      while (taken.has(`${slug}-${counter}`)) counter++;
       slug = `${slug}-${counter}`;
     }
+    if (reservedSlugs) reservedSlugs.add(slug);
 
     // Build tag connect-or-create operations
     const tagOps = (tags ?? []).map((name) => ({
@@ -54,7 +79,7 @@ export const NoteService = {
     }));
 
     if (directoryId) {
-      const directory = await prisma.directory.findFirst({
+      const directory = await db.directory.findFirst({
         where: { id: directoryId, userId },
         select: { id: true },
       });
@@ -63,7 +88,9 @@ export const NoteService = {
       }
     }
 
-    const note = await prisma.$transaction(async (tx) => {
+    // The write body, runnable against either an injected transaction client
+    // or one we open ourselves.
+    const runWrite = async (tx) => {
       const created = await tx.note.create({
         data: {
           title,
@@ -74,6 +101,7 @@ export const NoteService = {
           status: status ?? 'DRAFT',
           userId,
           directoryId: directoryId ?? null,
+          ...meta,
           tags: tagOps.length ? { connectOrCreate: tagOps } : undefined,
           revisions: {
             create: {
@@ -94,9 +122,192 @@ export const NoteService = {
       await resolveUnresolvedLinks(tx, created.id, title, userId);
 
       return created;
-    });
+    };
+
+    // Batch path injects a tx: run inline so all items commit in the caller's transaction.
+    // Auto-linking AND embedding are skipped on this path — createMemories does neither.
+    // Embeddings for batch-created notes are written only on a later standalone update
+    // or by running scripts/backfill-embeddings.js (covers rows where embedding IS NULL).
+    if (opts.tx) {
+      return runWrite(opts.tx);
+    }
+
+    // Standalone path opens its own transaction (unchanged behavior).
+    const note = await prisma.$transaction(runWrite);
+
+    // Persist the vector via raw SQL: Prisma cannot write Unsupported("vector").
+    if (embedding) await writeEmbedding(note.id, embedding);
+
+    // Best-effort semantic auto-linking, outside the write transaction.
+    await autoLinkSemantic(userId, note.id, title);
 
     return note;
+  },
+
+  /**
+   * Recall-then-upsert a durable agent memory.
+   *
+   * Resolves an existing memory by EXACT title within the caller's own notes
+   * that carry the `agent-memory` tag — matched on title, never slug (slugs are
+   * globally unique and the collision check is not user-scoped). When a match
+   * is found:
+   *   - mode 'append' (default): append a timestamped section to the note
+   *   - mode 'replace' (explicit only): overwrite the existing content
+   * When no match is found, or mode is 'new', a fresh PUBLISHED memory note is
+   * created in the user's `memories` directory. The `agent-memory` tag is always
+   * applied and de-duplicated.
+   *
+   * @param {string} userId
+   * @param {{ title: string, content: string, tags?: string[], mode?: 'append'|'replace'|'new', authType?: string, apiKeyId?: string, apiKeyName?: string }} data
+   * @param {{ tx?: import('@prisma/client').Prisma.TransactionClient, reservedSlugs?: Set<string> }} [opts={}] - Inject `tx` / `reservedSlugs` from a batch caller (e.g. `createMemories`). Omit for standalone behaviour — identical to before R12.2.
+   * @returns {Promise<{ id: string, slug: string, action: 'created'|'updated', excerpt: string }>}
+   */
+  async upsertMemory(userId, data, opts = {}) {
+    const { title, content, tags = [], mode = 'append', metadata, authType, apiKeyId, apiKeyName } = data;
+    const auth = { authType, apiKeyId, apiKeyName };
+    const memoryTags = [...new Set([...tags, 'agent-memory'])];
+    const memoriesDirectory = await DirectoryService.findOrCreateMemoriesDirectory(userId);
+
+    // mode 'new' preserves the legacy always-create behavior.
+    if (mode === 'new') {
+      const created = await NoteService.createNote(userId, {
+        title,
+        content,
+        status: 'PUBLISHED',
+        tags: memoryTags,
+        directoryId: memoriesDirectory.id,
+        metadata,
+        ...auth,
+      }, opts);
+      return { id: created.id, slug: created.slug, action: 'created', excerpt: created.excerpt };
+    }
+
+    // Recall: resolve an existing agent-memory by EXACT title, scoped to the
+    // owning user. findFirst on title (NOT slug). orderBy keeps the freshest.
+    // Use the injected tx client when present so the read is in the same snapshot.
+    const db = opts.tx ?? prisma;
+    const existing = await db.note.findFirst({
+      where: {
+        userId,
+        title,
+        status: { not: 'ARCHIVED' },
+        tags: { some: { name: 'agent-memory' } },
+      },
+      orderBy: { updatedAt: 'desc' },
+      include: { tags: true },
+    });
+
+    // Nothing to consolidate → create a new memory.
+    if (!existing) {
+      const created = await NoteService.createNote(userId, {
+        title,
+        content,
+        status: 'PUBLISHED',
+        tags: memoryTags,
+        directoryId: memoriesDirectory.id,
+        metadata,
+        ...auth,
+      }, opts);
+      return { id: created.id, slug: created.slug, action: 'created', excerpt: created.excerpt };
+    }
+
+    // Consolidate into the existing memory.
+    // Note: updateNote always opens its own prisma.$transaction and does not
+    // accept a tx injection, so this path is outside the caller's transaction.
+    const nextContent =
+      mode === 'replace'
+        ? content
+        : `${existing.content}\n\n## Update ${new Date().toISOString()}\n\n${content}`;
+    const mergedTags = [...new Set([...existing.tags.map((t) => t.name), ...memoryTags])];
+
+    const { note } = await NoteService.updateNote(userId, existing.slug, {
+      content: nextContent,
+      tags: mergedTags,
+      metadata,
+      ...auth,
+    });
+    return { id: note.id, slug: note.slug, action: 'updated', excerpt: note.excerpt };
+  },
+
+  /**
+   * Batch-create memory notes, best-effort per item.
+   *
+   * Each item runs through `upsertMemory` (or `createNote` when upsertMemory is
+   * absent), sharing one slug-reservation set so a session-end flush of N
+   * findings is one DB round trip. A single failing item is captured in its
+   * result `error` and does not abort the survivors.
+   *
+   * Atomicity caveat: the CREATE (mode 'new') path runs inside the single batch
+   * transaction. The append/replace (consolidate) path delegates to `updateNote`,
+   * which opens its OWN transaction and does not accept an injected tx — so the
+   * batch is NOT fully atomic across consolidate items; it is best-effort per item.
+   *
+   * @param {string} userId - ID of the owning user.
+   * @param {Array<{ title: string, content: string, status?: string, tags?: string[], directoryId?: string | null, mode?: string, authType?: string, apiKeyId?: string, apiKeyName?: string }>} memories
+   * @param {{ tx?: import('@prisma/client').Prisma.TransactionClient }} [opts={}] - Inject `tx` to compose this batch inside a larger transaction.
+   * @returns {Promise<Array<{ index: number, id: string | null, slug: string | null, action: 'created' | 'updated' | null, error: string | null }>>}
+   */
+  async createMemories(userId, memories, opts = {}) {
+    const run = async (tx) => {
+      const reservedSlugs = new Set();
+      const results = [];
+
+      for (let index = 0; index < memories.length; index++) {
+        const memory = memories[index];
+        try {
+          let id;
+          let slug;
+          let action;
+
+          if (typeof NoteService.upsertMemory === 'function') {
+            // Delegate to upsertMemory so the batch also consolidates duplicates.
+            const upserted = await NoteService.upsertMemory(
+              userId,
+              memory,
+              { tx, reservedSlugs },
+            );
+            id = upserted.id;
+            slug = upserted.slug;
+            action = upserted.action;
+          } else {
+            const note = await NoteService.createNote(
+              userId,
+              {
+                title: memory.title,
+                content: memory.content,
+                status: memory.status ?? 'PUBLISHED',
+                tags: memory.tags,
+                directoryId: memory.directoryId,
+                authType: memory.authType,
+                apiKeyId: memory.apiKeyId,
+                apiKeyName: memory.apiKeyName,
+              },
+              { tx, reservedSlugs },
+            );
+            id = note.id;
+            slug = note.slug;
+            action = 'created';
+          }
+
+          results.push({ index, id, slug, action, error: null });
+        } catch (err) {
+          results.push({
+            index,
+            id: null,
+            slug: null,
+            action: null,
+            error: err?.message ?? String(err),
+          });
+        }
+      }
+
+      return results;
+    };
+
+    if (opts.tx) {
+      return run(opts.tx);
+    }
+    return prisma.$transaction(run);
   },
 
   /**
@@ -211,7 +422,7 @@ export const NoteService = {
    *
    * @param {string} userId - ID of the owning user.
    * @param {string} slug - Current note slug.
-   * @param {{ title?: string, content?: string, status?: string, tags?: string[], directoryId?: string | null, message?: string, pinned?: boolean, authType?: string, apiKeyId?: string, apiKeyName?: string }} data
+   * @param {{ title?: string, content?: string, status?: string, tags?: string[], directoryId?: string | null, message?: string, pinned?: boolean, authType?: string, apiKeyId?: string, apiKeyName?: string, metadata?: { source?: string, confidence?: number, importance?: number } }} data
    * @returns {Promise<{ note: import('@prisma/client').Note, before: { title: string, status: string, tags: string[], content: string } }>}
    * @throws {{ statusCode: number, message: string }} 404 if not found.
    */
@@ -230,6 +441,7 @@ export const NoteService = {
     const tags = data.tags;
     const message = data.message;
     const { authType, apiKeyId, apiKeyName } = data;
+    const meta = normalizeMetadata(data.metadata);
 
     if (data.directoryId) {
       const directory = await prisma.directory.findFirst({
@@ -251,6 +463,11 @@ export const NoteService = {
     const excerpt = generateExcerpt(content);
     const wikilinks = extractWikilinks(content);
     const { frontmatter } = parseFrontmatter(content);
+
+    // Recompute the embedding only when the embedded text (title + content)
+    // actually changed, and always OUTSIDE the transaction.
+    const embeddingChanged = content !== existing.content || title !== existing.title;
+    const embedding = embeddingChanged ? await embedText(`${title}\n\n${content}`) : null;
 
     // Re-generate slug if title changed
     let newSlug = existing.slug;
@@ -280,6 +497,7 @@ export const NoteService = {
       status,
       ...(data.pinned !== undefined && { pinned: data.pinned }),
       ...(Object.hasOwn(data, 'directoryId') && { directoryId: data.directoryId }),
+      ...meta,
     };
 
     // Handle tags: disconnect all existing, then connect-or-create new ones
@@ -325,6 +543,9 @@ export const NoteService = {
       return updated;
     });
 
+    // Persist the vector via raw SQL: Prisma cannot write Unsupported("vector").
+    if (embedding) await writeEmbedding(note.id, embedding);
+
     return { note, before };
   },
 
@@ -351,6 +572,53 @@ export const NoteService = {
     });
 
     return note;
+  },
+
+  /**
+   * Auto-archive stale, low-salience agent memories (soft-delete only).
+   *
+   * Candidate selection uses raw SQL because it must rank staleness off
+   * `COALESCE(lastAccessedAt, createdAt)` — an expression Prisma's query
+   * builder cannot express. Each candidate is then archived via the existing
+   * `archiveNote` soft-delete path; nothing is ever hard-deleted.
+   *
+   * Keep-signals: `pinned = true` (always kept) and R8 `importance` — a note
+   * with `COALESCE(importance,0) >= FORGET_MIN_IMPORTANCE` is kept.
+   *
+   * @param {string} userId
+   * @param {{ olderThanDays?: number }} [opts={}]
+   * @returns {Promise<{ archived: number }>}
+   */
+  async forgetStale(userId, opts = {}) {
+    const days = opts.olderThanDays ?? FORGET_STALE_DEFAULT_DAYS;
+    const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+    const candidates = await prisma.$queryRaw`
+      SELECT n."slug"
+      FROM "Note" n
+      WHERE n."userId" = ${userId}
+        AND n."status" != 'ARCHIVED'
+        AND n."pinned" = false
+        AND COALESCE(n."importance", 0) < ${FORGET_MIN_IMPORTANCE}
+        AND COALESCE(n."lastAccessedAt", n."createdAt") < ${cutoff}
+        AND EXISTS (
+          SELECT 1 FROM "_NoteToTag" nt
+          INNER JOIN "Tag" t ON t."id" = nt."B"
+          WHERE nt."A" = n."id" AND t."name" = ${'agent-memory'}
+        )
+    `;
+
+    let archived = 0;
+    for (const { slug } of candidates) {
+      try {
+        await this.archiveNote(userId, slug);
+        archived += 1;
+      } catch {
+        // Best-effort: a single failure does not abort the sweep.
+      }
+    }
+
+    return { archived };
   },
 
   /**
@@ -436,6 +704,54 @@ export const NoteService = {
 };
 
 /**
+ * Normalize and clamp agent-supplied memory metadata.
+ *
+ * Returns ONLY the keys that were supplied (and finite), so callers can spread
+ * the result into a Prisma create/update without overwriting existing values
+ * with nulls. `confidence` is clamped to [0, 1]; `importance` to an integer in
+ * [1, 5]. `importance` is agent-supplied and gameable, hence the hard clamp.
+ *
+ * @param {{ source?: string|null, confidence?: number|null, importance?: number|null } | undefined} metadata
+ * @returns {{ source?: string, confidence?: number, importance?: number }}
+ */
+function normalizeMetadata(metadata) {
+  if (!metadata || typeof metadata !== 'object') return {};
+  /** @type {{ source?: string, confidence?: number, importance?: number }} */
+  const out = {};
+  if (metadata.source !== undefined && metadata.source !== null) {
+    out.source = String(metadata.source);
+  }
+  if (metadata.confidence !== undefined && metadata.confidence !== null) {
+    const c = Number(metadata.confidence);
+    if (Number.isFinite(c)) out.confidence = Math.min(1, Math.max(0, c));
+  }
+  if (metadata.importance !== undefined && metadata.importance !== null) {
+    const i = Number(metadata.importance);
+    if (Number.isFinite(i)) out.importance = Math.min(5, Math.max(1, Math.round(i)));
+  }
+  return out;
+}
+
+/**
+ * Persist a note's embedding via raw SQL.
+ *
+ * `Note.embedding` is `Unsupported("vector(1024)")`, which the Prisma typed
+ * client cannot write — we format the array as a pgvector literal and cast it.
+ *
+ * @param {string} noteId - Target note id.
+ * @param {number[]} embedding - The embedding vector.
+ */
+async function writeEmbedding(noteId, embedding) {
+  const literal = `[${embedding.join(',')}]`;
+  try {
+    await prisma.$executeRaw`UPDATE "Note" SET "embedding" = ${literal}::vector WHERE "id" = ${noteId}`;
+  } catch {
+    // Best-effort: a dimension mismatch or DB error must not fail the note write
+    // that already committed. Silently swallow so callers always resolve.
+  }
+}
+
+/**
  * Resolve any existing unresolved links whose `toTitle` matches the given title.
  *
  * Called after creating or updating a note so that previously dangling links
@@ -463,4 +779,36 @@ async function resolveUnresolvedLinks(tx, noteId, title, userId) {
       toTitle: null,
     },
   });
+}
+
+/**
+ * Auto-link a freshly created note to its top semantic neighbours.
+ *
+ * Runs a full-text search for the note's title, keeps the top-K candidates
+ * above {@link AUTO_LINK_MIN_RANK} (excluding the note itself), and creates
+ * derived `related-to`/`semantic` edges. Best-effort: a search failure must
+ * never fail note creation.
+ *
+ * @param {string} userId
+ * @param {string} noteId
+ * @param {string} title
+ */
+async function autoLinkSemantic(userId, noteId, title) {
+  try {
+    const { notes } = await SearchService.search(userId, title, {
+      limit: AUTO_LINK_TOP_K + 1,
+    });
+    const targetIds = notes
+      .filter((n) => n.id !== noteId && Number(n.rank) >= AUTO_LINK_MIN_RANK)
+      .slice(0, AUTO_LINK_TOP_K)
+      .map((n) => n.id);
+    if (targetIds.length) {
+      await LinkService.autoLink(noteId, targetIds, {
+        relation: 'related-to',
+        source: 'semantic',
+      });
+    }
+  } catch {
+    // Auto-linking is best-effort; swallow so note creation always succeeds.
+  }
 }

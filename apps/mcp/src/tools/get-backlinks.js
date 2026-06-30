@@ -59,6 +59,8 @@ export function register(server, auth) {
           slug: n.slug,
           title: n.title,
           tags: n.tags.map((t) => t.name),
+          relation: n.relation ?? null,
+          weight: n.weight ?? 1,
         }));
 
         await logMcpAction(auth, {

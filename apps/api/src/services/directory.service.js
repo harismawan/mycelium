@@ -1,4 +1,5 @@
 import { prisma } from '../db.js';
+import { MEMORY_NAMESPACE_DIR } from '@mycelium/shared';
 
 function normalizeName(name) {
   return name.trim();
@@ -178,13 +179,36 @@ export const DirectoryService = {
    */
   async findOrCreateMemoriesDirectory(userId) {
     const existing = await prisma.directory.findFirst({
-      where: { userId, parentId: null, name: 'memories' },
+      where: { userId, parentId: null, name: MEMORY_NAMESPACE_DIR },
       select: { id: true },
     });
     if (existing) return existing;
 
     return prisma.directory.create({
-      data: { name: 'memories', parentId: null, userId },
+      data: { name: MEMORY_NAMESPACE_DIR, parentId: null, userId },
+      select: { id: true },
+    });
+  },
+
+  /**
+   * Find or create the per-API-key memory namespace directory `memories/<apiKeyId>`.
+   * Uses the stable apiKeyId (not the mutable apiKeyName) so the subtree survives renames.
+   *
+   * @param {string} userId
+   * @param {string} apiKeyId
+   * @returns {Promise<{ id: string }>}
+   */
+  async findOrCreateMemoryNamespace(userId, apiKeyId) {
+    const root = await this.findOrCreateMemoriesDirectory(userId);
+
+    const existing = await prisma.directory.findFirst({
+      where: { userId, parentId: root.id, name: apiKeyId },
+      select: { id: true },
+    });
+    if (existing) return existing;
+
+    return prisma.directory.create({
+      data: { name: apiKeyId, parentId: root.id, userId },
       select: { id: true },
     });
   },

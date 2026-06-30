@@ -42,3 +42,110 @@ export const SCOPES = Object.freeze({
   AGENT_READ: 'agent:read',
   ACTIVITY_LOG_READ: 'activity-log:read',
 });
+
+/**
+ * Maximum number of nodes returned by a single graph read before truncation.
+ * Caps the token cost of `LinkService.getGraph`, the `/api/v1/graph` routes,
+ * and the `get_graph` MCP tool. The most recently updated nodes survive the cap.
+ *
+ * @type {number}
+ */
+export const MAX_GRAPH_NODES = 200;
+
+/**
+ * Maximum BFS depth honored by ego-subgraph traversal. Requested depths above
+ * this are clamped down; non-numeric depths are rejected at the route edge and
+ * coerced to the default of 1 in the service.
+ *
+ * @type {number}
+ */
+export const MAX_GRAPH_DEPTH = 5;
+
+/**
+ * Maximum number of rows returned by a single `LinkService.getBacklinks` /
+ * `getOutgoingLinks` read (per list for outgoing links).
+ *
+ * @type {number}
+ */
+export const MAX_LINK_RESULTS = 25;
+
+/**
+ * Canonical relation vocabulary for typed wikilinks (`[[relation: Title]]`).
+ *
+ * `extractWikilinks` only splits an inner `[[...]]` segment on its first colon
+ * when the prefix matches one of these values; otherwise the whole segment is
+ * treated as the title (so `[[Chapter 1: Intro]]` is preserved).
+ *
+ * @type {readonly string[]}
+ */
+export const RELATION_VOCAB = Object.freeze([
+  'supports',
+  'contradicts',
+  'derived-from',
+  'refines',
+  'related-to',
+]);
+
+/**
+ * Per-hop decay factor applied when scoring ego-subgraph nodes.
+ *
+ * A node `h` hops from the ego center contributes
+ * `edgeWeight * GRAPH_DECAY ** h` to its accumulated score, so nearer nodes
+ * dominate the ranking. Range: (0, 1).
+ *
+ * @type {number}
+ */
+export const GRAPH_DECAY = 0.5;
+
+/**
+ * Name of the root directory that holds agent-written memory notes.
+ * Per-API-key memories are namespaced as `memories/<apiKeyId>` beneath it.
+ *
+ * @type {string}
+ */
+export const MEMORY_NAMESPACE_DIR = 'memories';
+
+/**
+ * Embedding vector dimensionality for the optional semantic-search arm.
+ * Must match the `vector(N)` column in schema.prisma and the provider's
+ * configured output size.
+ *
+ * @type {number}
+ */
+export const EMBEDDING_DIMENSIONS = 1024;
+
+/**
+ * Reciprocal Rank Fusion constant. Fused score for a document is the sum of
+ * `1 / (RRF_K + rank)` across each candidate list it appears in (rank 0-based).
+ *
+ * @type {number}
+ */
+export const RRF_K = 60;
+
+/**
+ * Per-day exponential decay rate applied to a memory's recency when ranking
+ * topic recall in `SearchService.getContext`. Larger = forgets faster.
+ * 0.02/day ≈ a ~35-day half-life. Treat as tunable.
+ *
+ * @type {number}
+ */
+export const MEMORY_DECAY_RATE = 0.02;
+
+/**
+ * Default age, in days, past which a low-salience agent memory becomes
+ * eligible for auto-archival by `NoteService.forgetStale`. Age is measured
+ * from `COALESCE(lastAccessedAt, createdAt)`, never `updatedAt`.
+ *
+ * @type {number}
+ */
+export const FORGET_STALE_DEFAULT_DAYS = 90;
+
+/**
+ * Notes whose `importance` (R8, 1–5) is >= this threshold are never
+ * auto-archived. When `importance` is null/absent, `pinned` is the fallback
+ * keep-signal. COALESCE treats null importance as 0, so unscored memories
+ * remain eligible.
+ *
+ * @type {number}
+ */
+export const FORGET_MIN_IMPORTANCE = 3;

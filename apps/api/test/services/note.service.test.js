@@ -25,6 +25,10 @@ const mockTag = {
 const mockRevision = {
   create: mock(() => ({})),
 };
+const mockQueryRaw = mock(() => []);
+const mockSearchService = {
+  search: mock(() => ({ notes: [], nextCursor: null })),
+};
 
 /** Tracks the callback/array passed to $transaction so we can inspect calls */
 const mockTransaction = mock(async (arg) => {
@@ -49,8 +53,13 @@ mock.module('@prisma/client', () => ({
       this.tag = mockTag;
       this.revision = mockRevision;
       this.$transaction = mockTransaction;
+      this.$queryRaw = mockQueryRaw;
     }
   },
+}));
+
+mock.module('../../src/services/search.service.js', () => ({
+  SearchService: mockSearchService,
 }));
 
 // ---------------------------------------------------------------------------
@@ -96,6 +105,9 @@ beforeEach(() => {
   mockLink.updateMany.mockReset();
   mockTag.findMany.mockReset();
   mockRevision.create.mockReset();
+  mockQueryRaw.mockReset();
+  mockSearchService.search.mockReset();
+  mockSearchService.search.mockResolvedValue({ notes: [], nextCursor: null });
   mockTransaction.mockReset();
 
   // Restore default $transaction implementation
@@ -213,11 +225,15 @@ describe('NoteService.createNote', () => {
     expect(resolved).toBeDefined();
     expect(resolved.fromId).toBe('note_new');
     expect(resolved.toTitle).toBeNull();
+    expect(resolved.relation).toBeNull();
+    expect(resolved.weight).toBe(1);
+    expect(resolved.source).toBe('wikilink');
 
     const unresolved = data.find((l) => l.toTitle === 'Missing Note');
     expect(unresolved).toBeDefined();
     expect(unresolved.fromId).toBe('note_new');
     expect(unresolved.toId).toBeNull();
+    expect(unresolved.source).toBe('wikilink');
   });
 
   /** Validates: Requirements 2.4 */
@@ -250,8 +266,115 @@ describe('NoteService.createNote', () => {
     const createArg = mockNote.create.mock.calls[0][0];
     expect(createArg.data.status).toBe('DRAFT');
   });
+
+  test('auto-links semantically similar notes after the create transaction', async () => {
+    const content = 'No wikilinks here';
+    mockNote.create.mockResolvedValue({ ...baseNote, id: 'note_new' });
+    mockNote.findMany.mockResolvedValue([]); // slug + resolveUnresolved lookups
+    mockLink.findMany.mockResolvedValue([]); // reconcile + autoLink existing-edge lookup
+    mockLink.updateMany.mockResolvedValue({ count: 0 });
+    mockSearchService.search.mockResolvedValue({
+      notes: [
+        { id: 'note_new', rank: 0.9 }, // self — excluded
+        { id: 'sem_1', rank: 0.5 },
+        { id: 'sem_2', rank: 0.005 }, // below threshold — excluded
+      ],
+      nextCursor: null,
+    });
+
+    await NoteService.createNote(userId, { title: 'My Note', content });
+
+    const semanticCall = mockLink.createMany.mock.calls.find((call) =>
+      call[0].data.some((d) => d.source === 'semantic'),
+    );
+    expect(semanticCall).toBeDefined();
+    expect(semanticCall[0].data).toEqual([
+      {
+        fromId: 'note_new',
+        toId: 'sem_1',
+        toTitle: null,
+        relation: 'related-to',
+        weight: 1,
+        source: 'semantic',
+      },
+    ]);
+  });
+
+  test('persists clamped memory metadata (source/confidence/importance)', async () => {
+    mockNote.create.mockResolvedValue({ ...baseNote });
+    mockNote.findMany.mockResolvedValue([]);
+    mockLink.findMany.mockResolvedValue([]);
+    mockLink.updateMany.mockResolvedValue({ count: 0 });
+
+    await NoteService.createNote(userId, {
+      title: 'My Note',
+      content: 'Hello',
+      metadata: { source: 'session:abc', confidence: 1.7, importance: 9 },
+    });
+
+    const createArg = mockNote.create.mock.calls[0][0];
+    expect(createArg.data.source).toBe('session:abc');
+    expect(createArg.data.confidence).toBe(1); // clamped to [0,1]
+    expect(createArg.data.importance).toBe(5); // clamped to [1,5]
+  });
+
+  test('omits metadata keys that were not provided on create', async () => {
+    mockNote.create.mockResolvedValue({ ...baseNote });
+    mockNote.findMany.mockResolvedValue([]);
+    mockLink.findMany.mockResolvedValue([]);
+    mockLink.updateMany.mockResolvedValue({ count: 0 });
+
+    await NoteService.createNote(userId, { title: 'My Note', content: 'Hello' });
+
+    const createArg = mockNote.create.mock.calls[0][0];
+    expect('source' in createArg.data).toBe(false);
+    expect('confidence' in createArg.data).toBe(false);
+    expect('importance' in createArg.data).toBe(false);
+  });
 });
 
+// ---------------------------------------------------------------------------
+// createNote — injected transaction + shared slug reservation (R12.1)
+// ---------------------------------------------------------------------------
+describe('NoteService.createNote with injected tx', () => {
+  test('does not open a nested transaction and writes through the injected tx', async () => {
+    mockNote.findMany.mockResolvedValue([]); // slug lookup -> no collisions
+    mockLink.findMany.mockResolvedValue([]);
+    mockLink.updateMany.mockResolvedValue({ count: 0 });
+    mockNote.create.mockResolvedValue({ ...baseNote, id: 'note_tx', slug: 'my-note' });
+
+    const tx = { note: mockNote, link: mockLink, directory: mockDirectory };
+
+    const result = await NoteService.createNote(
+      userId,
+      { title: 'My Note', content: 'body' },
+      { tx },
+    );
+
+    // The whole point: no inner $transaction is opened when one is injected.
+    expect(mockTransaction).not.toHaveBeenCalled();
+    expect(mockNote.create).toHaveBeenCalledTimes(1);
+    expect(result.id).toBe('note_tx');
+  });
+
+  test('reservedSlugs dedups across in-flight items with no extra DB hit', async () => {
+    mockNote.findMany.mockResolvedValue([]); // DB reports no collisions for either call
+    mockLink.findMany.mockResolvedValue([]);
+    mockLink.updateMany.mockResolvedValue({ count: 0 });
+    mockNote.create.mockResolvedValue({ ...baseNote });
+
+    const tx = { note: mockNote, link: mockLink, directory: mockDirectory };
+    const reservedSlugs = new Set();
+
+    await NoteService.createNote(userId, { title: 'My Note', content: 'a' }, { tx, reservedSlugs });
+    await NoteService.createNote(userId, { title: 'My Note', content: 'b' }, { tx, reservedSlugs });
+
+    expect(mockNote.create.mock.calls[0][0].data.slug).toBe('my-note');
+    expect(mockNote.create.mock.calls[1][0].data.slug).toBe('my-note-1');
+    expect(reservedSlugs.has('my-note')).toBe(true);
+    expect(reservedSlugs.has('my-note-1')).toBe(true);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // listNotes
@@ -539,6 +662,24 @@ describe('NoteService.updateNote', () => {
     await expect(NoteService.updateNote(userId, 'my-note', { directoryId: 'other_dir' }))
       .rejects.toMatchObject({ statusCode: 404, message: 'Directory not found' });
   });
+
+  test('updates only the provided metadata fields', async () => {
+    mockNote.findFirst.mockResolvedValue({ ...baseNote });
+    mockNote.findMany.mockResolvedValue([]);
+    mockNote.update.mockResolvedValue({ ...baseNote });
+    mockLink.findMany.mockResolvedValue([]);
+    mockLink.updateMany.mockResolvedValue({ count: 0 });
+
+    await NoteService.updateNote(userId, 'my-note', {
+      content: 'Updated body',
+      metadata: { importance: 4 },
+    });
+
+    const updateArg = mockNote.update.mock.calls[0][0];
+    expect(updateArg.data.importance).toBe(4);
+    expect('source' in updateArg.data).toBe(false);
+    expect('confidence' in updateArg.data).toBe(false);
+  });
 });
 
 
@@ -732,6 +873,81 @@ describe('NoteService.deleteNote', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// createMemories — batch save (R12.2)
+// ---------------------------------------------------------------------------
+describe('NoteService.createMemories', () => {
+  test('creates all items in one transaction with per-item created results', async () => {
+    // createMemories delegates to upsertMemory — mock it to control results
+    // without pulling in the full upsertMemory pipeline (directories, recalls).
+    const originalUpsert = NoteService.upsertMemory;
+    const upsert = mock()
+      .mockResolvedValueOnce({ id: 'n1', slug: 'alpha', action: 'created', excerpt: 'a' })
+      .mockResolvedValueOnce({ id: 'n2', slug: 'beta', action: 'created', excerpt: 'b' });
+    NoteService.upsertMemory = upsert;
+    try {
+      const results = await NoteService.createMemories(userId, [
+        { title: 'Alpha', content: 'a' },
+        { title: 'Beta', content: 'b' },
+      ]);
+
+      // One transaction wraps the whole batch; inner upsertMemory calls reuse it.
+      expect(mockTransaction).toHaveBeenCalledTimes(1);
+      expect(results).toEqual([
+        { index: 0, id: 'n1', slug: 'alpha', action: 'created', error: null },
+        { index: 1, id: 'n2', slug: 'beta', action: 'created', error: null },
+      ]);
+    } finally {
+      NoteService.upsertMemory = originalUpsert;
+    }
+  });
+
+  test('is best-effort: a bad item is captured without aborting the rest', async () => {
+    const originalUpsert = NoteService.upsertMemory;
+    const upsert = mock()
+      .mockResolvedValueOnce({ id: 'ok', slug: 'ok', action: 'created', excerpt: 'e' })
+      .mockRejectedValueOnce({ statusCode: 404, message: 'Directory not found' });
+    NoteService.upsertMemory = upsert;
+    try {
+      const results = await NoteService.createMemories(userId, [
+        { title: 'Good', content: 'a' },
+        { title: 'Bad', content: 'b', directoryId: 'missing-dir' },
+      ]);
+
+      expect(results[0]).toEqual({ index: 0, id: 'ok', slug: 'ok', action: 'created', error: null });
+      expect(results[1].index).toBe(1);
+      expect(results[1].id).toBeNull();
+      expect(results[1].action).toBeNull();
+      expect(results[1].error).toBe('Directory not found');
+    } finally {
+      NoteService.upsertMemory = originalUpsert;
+    }
+  });
+
+  test('delegates to upsertMemory when present, forwarding the shared tx', async () => {
+    const originalUpsert = NoteService.upsertMemory;
+    const upsert = mock(async () => ({ id: 'up1', slug: 'consolidated', action: 'updated', excerpt: 'x' }));
+    NoteService.upsertMemory = upsert;
+    try {
+      const results = await NoteService.createMemories(userId, [
+        { title: 'Topic', content: 'c', tags: ['t'], mode: 'append' },
+      ]);
+
+      expect(upsert).toHaveBeenCalledTimes(1);
+      const [calledUserId, calledData, calledOpts] = upsert.mock.calls[0];
+      expect(calledUserId).toBe(userId);
+      expect(calledData).toEqual({ title: 'Topic', content: 'c', tags: ['t'], mode: 'append' });
+      expect(calledOpts.tx).toBeDefined();
+      expect(calledOpts.reservedSlugs instanceof Set).toBe(true);
+      expect(results[0]).toEqual({
+        index: 0, id: 'up1', slug: 'consolidated', action: 'updated', error: null,
+      });
+    } finally {
+      NoteService.upsertMemory = originalUpsert;
+    }
+  });
+});
+
 describe('NoteService.updateNote — returns before snapshot', () => {
   test('returns { note, before } with pre-update field values', async () => {
     const existing = {
@@ -771,5 +987,57 @@ describe('NoteService.updateNote — returns before snapshot', () => {
     expect(result.before.status).toBe('DRAFT');
     expect(result.before.tags).toEqual(['old-tag']);
     expect(result.before.content).toBe('Old content here');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// forgetStale
+// ---------------------------------------------------------------------------
+describe('NoteService.forgetStale', () => {
+  /** Validates: R14.4 — archives stale low-salience notes via archiveNote */
+  test('archives each stale candidate via archiveNote and returns the count', async () => {
+    mockQueryRaw.mockResolvedValue([{ slug: 'stale-1' }, { slug: 'stale-2' }]);
+    mockNote.findFirst
+      .mockResolvedValueOnce({ id: 'n1', title: 'Stale 1' })
+      .mockResolvedValueOnce({ id: 'n2', title: 'Stale 2' });
+    mockNote.update.mockResolvedValue({});
+
+    const result = await NoteService.forgetStale(userId, { olderThanDays: 30 });
+
+    expect(result).toEqual({ archived: 2 });
+    expect(mockNote.update).toHaveBeenCalledTimes(2);
+    expect(mockNote.update).toHaveBeenCalledWith({
+      where: { id: 'n1' },
+      data: { status: 'ARCHIVED' },
+    });
+  });
+
+  test('candidate query excludes archived/pinned/important and decays on last access', async () => {
+    mockQueryRaw.mockResolvedValue([]);
+
+    const result = await NoteService.forgetStale(userId, { olderThanDays: 90 });
+
+    expect(result).toEqual({ archived: 0 });
+    expect(mockNote.update).not.toHaveBeenCalled();
+    const [strings] = mockQueryRaw.mock.calls[0];
+    const sql = strings.join('');
+    expect(sql).toContain(`"status" != 'ARCHIVED'`);
+    expect(sql).toContain('"pinned" = false');
+    expect(sql).toContain('COALESCE(n."importance", 0)');
+    expect(sql).toContain('COALESCE(n."lastAccessedAt", n."createdAt")');
+    // DATA SAFETY: must restrict to agent-memory tagged notes only
+    expect(sql).toContain('"_NoteToTag"');
+    // bound params are spread args after the strings array
+    const boundValues = mockQueryRaw.mock.calls[0].slice(1);
+    expect(boundValues).toContain('agent-memory');
+  });
+
+  test('defaults to FORGET_STALE_DEFAULT_DAYS when olderThanDays omitted', async () => {
+    mockQueryRaw.mockResolvedValue([]);
+
+    const result = await NoteService.forgetStale(userId);
+
+    expect(result).toEqual({ archived: 0 });
+    expect(mockQueryRaw).toHaveBeenCalledTimes(1);
   });
 });

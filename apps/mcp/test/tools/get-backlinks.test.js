@@ -53,8 +53,8 @@ describe('get_backlinks', () => {
   test('returns backlinks with correct shape', async () => {
     mockNoteService.getNote.mockImplementation(() => ({ id: 'n1' }));
     mockLinkService.getBacklinks.mockImplementation(() => [
-      { id: 'n2', slug: 'note-2', title: 'Note 2', tags: [{ name: 'tag1' }] },
-      { id: 'n3', slug: 'note-3', title: 'Note 3', tags: [] },
+      { id: 'n2', slug: 'note-2', title: 'Note 2', tags: [{ name: 'tag1' }], relation: 'refines', weight: 2 },
+      { id: 'n3', slug: 'note-3', title: 'Note 3', tags: [], relation: null, weight: 1 },
     ]);
 
     const result = await handler({ slug: 'target-note' });
@@ -66,6 +66,8 @@ describe('get_backlinks', () => {
     expect(parsed[0]).toHaveProperty('title');
     expect(parsed[0]).toHaveProperty('tags');
     expect(parsed[0].tags).toEqual(['tag1']);
+    expect(parsed[0].relation).toBe('refines');
+    expect(parsed[0].weight).toBe(2);
   });
 
   test('returns not-found error for missing note', async () => {

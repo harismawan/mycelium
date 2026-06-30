@@ -15,9 +15,12 @@ import { register as registerUpdateDirectory } from './tools/update-directory.js
 import { register as registerDeleteDirectory } from './tools/delete-directory.js';
 import { register as registerGetContext } from './tools/get-context.js';
 import { register as registerSaveMemory } from './tools/save-memory.js';
+import { register as registerSaveMemories } from './tools/save-memories.js';
+import { register as registerRemember } from './tools/remember.js';
 import { register as registerSetSessionContext } from './tools/set-session-context.js';
 import { register as registerGetSessionContext } from './tools/get-session-context.js';
 import { register as registerListSessionContext } from './tools/list-session-context.js';
+import { register as registerPromoteSessionContext } from './tools/promote-session-context.js';
 
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf-8'));
 
@@ -53,12 +56,15 @@ export function createServer(authContext) {
 
   // OpenClaw convenience tools
   registerGetContext(server, authContext);
+  registerRemember(server, authContext);
   registerSaveMemory(server, authContext);
+  registerSaveMemories(server, authContext);
 
   // Session context tools
   registerSetSessionContext(server, authContext);
   registerGetSessionContext(server, authContext);
   registerListSessionContext(server, authContext);
+  registerPromoteSessionContext(server, authContext);
 
   return server;
 }

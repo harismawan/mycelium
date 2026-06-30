@@ -2,12 +2,14 @@
 // Dual-audience knowledge base: human SPA + AI agent API
 
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [pgTrgm(map: "pg_trgm"), vector]
 }
 
 enum NoteStatus {
@@ -38,9 +40,15 @@ model Note {
   content     String
   frontmatter Json?
   excerpt     String?
+  source      String?
+  confidence  Float?
+  importance  Int?
   status      NoteStatus @default(DRAFT)
-  pinned      Boolean    @default(false)
-  searchVector Unsupported("tsvector")?
+  pinned         Boolean    @default(false)
+  lastAccessedAt DateTime?
+  accessCount    Int        @default(0)
+  searchVector Unsupported("tsvector")? @default(dbgenerated())
+  embedding    Unsupported("vector(1024)")?
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
   userId      String
@@ -57,6 +65,8 @@ model Note {
   @@index([userId])
   @@index([userId, directoryId])
   @@index([userId, status, createdAt])
+  @@index([searchVector], type: Gin, map: "Note_searchVector_idx")
+  @@index([title(ops: raw("gin_trgm_ops"))], type: Gin, map: "Note_title_trgm_idx")
 }
 
 model Directory {
@@ -83,12 +93,15 @@ model Link {
   toId      String?
   toTitle   String?
   relation  String?
+  weight    Float    @default(1)
+  source    String   @default("wikilink")
   createdAt DateTime @default(now())
   from      Note     @relation("FromNote", fields: [fromId], references: [id], onDelete: Cascade)
   to        Note?    @relation("ToNote", fields: [toId], references: [id], onDelete: SetNull)
 
   @@index([fromId])
   @@index([toId])
+  @@index([fromId, source])
 }
 
 model Tag {

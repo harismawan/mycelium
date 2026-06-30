@@ -21,14 +21,15 @@ export function register(server, auth) {
     {
       slug: z.string().optional(),
       depth: z.number().int().min(1).max(5).optional().default(1),
+      direction: z.enum(["out", "in", "both"]).optional().default("both"),
     },
-    async ({ slug, depth }) => {
+    async ({ slug, depth, direction }) => {
       const scopeError = checkScopes(["agent:read"], auth.scopes);
       if (scopeError) return scopeError;
 
       const start = performance.now();
       try {
-        const result = await LinkService.getGraph(auth.userId, { slug, depth });
+        const result = await LinkService.getGraph(auth.userId, { slug, depth, direction });
 
         await logMcpAction(auth, {
           action: "mcp:get_graph",

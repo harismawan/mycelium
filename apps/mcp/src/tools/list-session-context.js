@@ -22,7 +22,7 @@ export function register(server, auth) {
 
       const start = performance.now();
       try {
-        const entries = await listSessionValues(auth.userId);
+        const entries = await listSessionValues(auth.apiKeyId);
 
         await logMcpAction(auth, {
           action: "mcp:list_session_context",

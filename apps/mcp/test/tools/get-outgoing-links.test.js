@@ -53,17 +53,17 @@ describe('get_outgoing_links', () => {
   test('returns resolved and unresolved links', async () => {
     mockNoteService.getNote.mockImplementation(() => ({ id: 'n1' }));
     mockLinkService.getOutgoingLinks.mockImplementation(() => ({
-      resolved: [{ id: 'n2', slug: 'linked-note', title: 'Linked Note' }],
-      unresolved: [{ title: 'Missing Note' }],
+      resolved: [{ id: 'n2', slug: 'linked-note', title: 'Linked Note', relation: 'supports', weight: 2 }],
+      unresolved: [{ title: 'Missing Note', relation: null, weight: 1 }],
     }));
 
     const result = await handler({ slug: 'source-note' });
     expect(result.isError).toBeUndefined();
     const parsed = JSON.parse(result.content[0].text);
     expect(parsed.resolved).toHaveLength(1);
-    expect(parsed.resolved[0]).toEqual({ id: 'n2', slug: 'linked-note', title: 'Linked Note' });
+    expect(parsed.resolved[0]).toEqual({ id: 'n2', slug: 'linked-note', title: 'Linked Note', relation: 'supports', weight: 2 });
     expect(parsed.unresolved).toHaveLength(1);
-    expect(parsed.unresolved[0]).toEqual({ title: 'Missing Note' });
+    expect(parsed.unresolved[0]).toEqual({ title: 'Missing Note', relation: null, weight: 1 });
   });
 
   test('returns not-found error for missing note', async () => {

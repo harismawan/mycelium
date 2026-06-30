@@ -16,18 +16,18 @@ import { setSessionValue, validateSessionLimits } from "../session.js";
 export function register(server, auth) {
   server.tool(
     "set_session_context",
-    "Store a key-value pair in the ephemeral session context for this connection.",
+    "Store a key-value pair in the ephemeral session context for this connection (requires notes:write).",
     {
       key: z.string().min(1, "key is required"),
       value: z.string(),
     },
     async ({ key, value }) => {
-      const scopeError = checkScopes(["agent:read"], auth.scopes);
+      const scopeError = checkScopes(["notes:write"], auth.scopes);
       if (scopeError) return scopeError;
 
       const start = performance.now();
       try {
-        const limitError = await setSessionValue(auth.userId, key, value);
+        const limitError = await setSessionValue(auth.apiKeyId, key, value);
         if (limitError) {
           await logMcpAction(auth, {
             action: "mcp:set_session_context",

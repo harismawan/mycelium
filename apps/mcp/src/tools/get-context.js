@@ -26,14 +26,34 @@ export function register(server, auth) {
           "Topic to search for. If omitted, returns most recently updated notes.",
         ),
       limit: z.number().int().min(1).max(20).optional().default(10),
+      expand: z
+        .boolean()
+        .optional()
+        .default(false)
+        .describe(
+          "When true and a topic is given, expand the lexical matches with graph neighbors (co-citation) and re-rank. Default false.",
+        ),
+      expandDepth: z
+        .number()
+        .int()
+        .min(1)
+        .max(3)
+        .optional()
+        .default(1)
+        .describe("BFS depth for graph expansion when expand=true (1-3)."),
     },
-    async ({ topic, limit }) => {
+    async ({ topic, limit, expand, expandDepth }) => {
       const scopeError = checkScopes(["agent:read"], auth.scopes);
       if (scopeError) return scopeError;
 
       const start = performance.now();
       try {
-        const notes = await SearchService.getContext(auth.userId, { topic, limit });
+        const opts = { topic, limit };
+        if (expand) {
+          opts.expand = true;
+          opts.expandDepth = expandDepth;
+        }
+        const notes = await SearchService.getContext(auth.userId, opts);
 
         await logMcpAction(auth, {
           action: "mcp:get_context",

@@ -7,6 +7,7 @@ import rehypeRaw from 'rehype-raw';
 import rehypeSanitize from 'rehype-sanitize';
 import rehypeStringify from 'rehype-stringify';
 import YAML from 'yaml';
+import { RELATION_VOCAB } from './constants.js';
 
 /**
  * Parse YAML frontmatter from a Markdown string.
@@ -40,25 +41,49 @@ export function serializeFrontmatter(frontmatter, body) {
 }
 
 /**
- * Extract all `[[Wikilink]]` titles from Markdown content.
+ * Extract typed, weighted `[[Wikilink]]` references from Markdown content.
  *
- * Finds every occurrence of `[[...]]` in the provided Markdown and returns
- * a deduplicated array of the inner titles.
+ * For each `[[...]]` occurrence, an optional relation prefix is parsed: the
+ * inner text is split on its FIRST colon only when the trimmed, lower-cased
+ * prefix matches {@link RELATION_VOCAB}. Otherwise the whole inner text is the
+ * title (so `[[Chapter 1: Intro]]` is preserved). Results are deduplicated by
+ * `relation::title`; `count` is the number of occurrences of that pair (drives
+ * edge weight downstream).
  *
  * @param {string} markdown - Markdown content to scan for wikilinks.
- * @returns {string[]} Array of unique wikilink titles found in the content.
+ * @returns {Array<{ title: string, relation: string|null, count: number }>}
+ *   Deduplicated typed wikilinks with occurrence counts.
  */
 export function extractWikilinks(markdown) {
   const regex = /\[\[([^\]]+)\]\]/g;
-  const titles = [];
+  /** @type {Map<string, { title: string, relation: string|null, count: number }>} */
+  const byKey = new Map();
   let match;
   while ((match = regex.exec(markdown)) !== null) {
-    const title = match[1].trim();
-    if (title && !titles.includes(title)) {
-      titles.push(title);
+    const inner = match[1].trim();
+    if (!inner) continue;
+
+    let relation = null;
+    let title = inner;
+    const colon = inner.indexOf(':');
+    if (colon !== -1) {
+      const prefix = inner.slice(0, colon).trim().toLowerCase();
+      if (RELATION_VOCAB.includes(prefix)) {
+        relation = prefix;
+        title = inner.slice(colon + 1).trim();
+      }
+    }
+    if (!title) continue;
+
+    const key = `${relation ?? ''}::${title}`;
+    const existing = byKey.get(key);
+    if (existing) {
+      existing.count += 1;
+    } else {
+      byKey.set(key, { title, relation, count: 1 });
     }
   }
-  return titles;
+  return [...byKey.values()];
 }
 
 /**

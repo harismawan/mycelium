@@ -174,7 +174,7 @@ describe('OpenAPI Spec — Smoke Tests', () => {
     expect(desc.toLowerCase()).toContain('ai agent');
   });
 
-  test('tags array contains all 9 tags in correct order', () => {
+  test('tags array contains all 10 tags in correct order', () => {
     const expectedTags = [
       'Health',
       'Auth',
@@ -183,6 +183,7 @@ describe('OpenAPI Spec — Smoke Tests', () => {
       'Directories',
       'Graph',
       'Agent',
+      'Maintenance',
       'API Keys',
       'Activity Log',
     ];
@@ -412,7 +413,7 @@ describe('OpenAPI Spec — Operation Metadata Completeness', () => {
     expect(uniqueIds.size).toBe(ids.length);
   });
 
-  test('total count of operations matches expected (36 endpoints)', () => {
-    expect(operations.length).toBe(36);
+  test('total count of operations matches expected (37 endpoints)', () => {
+    expect(operations.length).toBe(37);
   });
 });

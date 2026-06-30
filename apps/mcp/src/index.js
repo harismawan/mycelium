@@ -50,8 +50,8 @@ async function startStdio() {
   log('info', 'MCP server started', { transport: 'stdio' });
 
   const cleanup = async () => {
-    await destroySession(auth.userId);
-    log('info', 'Session destroyed', { userId: auth.userId, reason: 'stdio close' });
+    await destroySession(auth.apiKeyId);
+    log('info', 'Session destroyed', { apiKeyId: auth.apiKeyId, reason: 'stdio close' });
   };
 
   process.on('SIGINT', cleanup);
@@ -100,8 +100,8 @@ async function startHttp() {
         const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined });
 
         transport.onclose = async () => {
-          await destroySession(auth.userId);
-          log('info', 'Session destroyed', { userId: auth.userId, reason: 'http close' });
+          await destroySession(auth.apiKeyId);
+          log('info', 'Session destroyed', { apiKeyId: auth.apiKeyId, reason: 'http close' });
         };
 
         await server.connect(transport);

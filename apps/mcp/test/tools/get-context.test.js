@@ -134,4 +134,43 @@ describe('get_context', () => {
     expect(parsed.error).toBe('Database error');
     expect(parsed.isRetryable).toBe(true);
   });
+
+  test('passes metadata fields through from SearchService.getContext', async () => {
+    const now = new Date();
+    mockSearchService.getContext.mockImplementation(() => [
+      {
+        id: 'n1', slug: 'alpha', title: 'Alpha', excerpt: 'ex',
+        source: 'session:1', confidence: 0.9, importance: 4,
+        tags: ['t'], updatedAt: now.toISOString(),
+      },
+    ]);
+
+    const result = await handler({ topic: 'alpha', limit: 5 });
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed[0]).toMatchObject({ source: 'session:1', confidence: 0.9, importance: 4 });
+  });
+
+  test('forwards expand and expandDepth when expand=true', async () => {
+    mockSearchService.getContext.mockImplementation(() => []);
+
+    await handler({ topic: 'alpha', limit: 10, expand: true, expandDepth: 2 });
+
+    expect(mockSearchService.getContext).toHaveBeenCalledWith('u1', {
+      topic: 'alpha',
+      limit: 10,
+      expand: true,
+      expandDepth: 2,
+    });
+  });
+
+  test('omits expand fields from the service call when expand is falsy', async () => {
+    mockSearchService.getContext.mockImplementation(() => []);
+
+    await handler({ topic: 'alpha', limit: 10, expand: false, expandDepth: 3 });
+
+    expect(mockSearchService.getContext).toHaveBeenCalledWith('u1', {
+      topic: 'alpha',
+      limit: 10,
+    });
+  });
 });

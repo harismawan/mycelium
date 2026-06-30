@@ -22,6 +22,11 @@ export const MessageResponse = t.Object({
   message: t.String({ description: 'Success message', examples: ['Operation completed'] }),
 });
 
+/** Result of a maintenance auto-archival sweep. */
+export const ForgetStaleResponse = t.Object({
+  archived: t.Integer({ description: 'Number of notes archived in this sweep', examples: [3] }),
+});
+
 // ─── User / Auth Responses ───────────────────────────────────────────────────
 
 /** User object returned by auth endpoints */
@@ -49,6 +54,9 @@ export const NoteResponse = t.Object({
   content: t.String({ description: 'Markdown content body' }),
   frontmatter: t.Union([t.Object({}), t.Null()], { description: 'Parsed YAML frontmatter or null' }),
   excerpt: t.Union([t.String(), t.Null()], { description: 'Auto-generated excerpt or null' }),
+  source: t.Union([t.String(), t.Null()], { description: 'Provenance of the memory or null' }),
+  confidence: t.Union([t.Number(), t.Null()], { description: 'Agent-supplied confidence 0..1 or null' }),
+  importance: t.Union([t.Number(), t.Null()], { description: 'Agent-supplied importance 1..5 or null' }),
   status: t.Union([t.Literal('DRAFT'), t.Literal('PUBLISHED'), t.Literal('ARCHIVED')], {
     description: 'Publication status',
   }),
@@ -149,6 +157,8 @@ export const BacklinksResponse = t.Object({
       slug: t.String(),
       title: t.String(),
       tags: t.Array(t.Object({ id: t.String(), name: t.String() })),
+      relation: t.Union([t.String(), t.Null()], { description: 'Edge relation type or null' }),
+      weight: t.Number({ description: 'Edge weight (wikilink occurrence count)' }),
     }),
     { description: 'Notes that link to this note' },
   ),
@@ -164,6 +174,12 @@ export const GraphResponse = t.Object({
       slug: t.String(),
       title: t.String(),
       status: t.String(),
+      hop: t.Optional(
+        t.Number({ description: 'BFS hop distance from the ego center (ego-subgraph reads only)' }),
+      ),
+      score: t.Optional(
+        t.Number({ description: 'Distance-decayed relevance score (ego-subgraph reads only)' }),
+      ),
     }),
     { description: 'Graph nodes representing notes' },
   ),
@@ -172,8 +188,17 @@ export const GraphResponse = t.Object({
       fromId: t.String(),
       toId: t.Union([t.String(), t.Null()]),
       relation: t.Union([t.String(), t.Null()]),
+      weight: t.Number({ description: 'Edge weight (wikilink occurrence count)' }),
+      createdAt: t.Optional(
+        t.Date({ description: 'Edge creation timestamp for temporal ordering' }),
+      ),
     }),
     { description: 'Graph edges representing links between notes' },
+  ),
+  truncated: t.Optional(
+    t.Boolean({
+      description: 'True when the node set was capped at MAX_GRAPH_NODES; some nodes/edges omitted',
+    }),
   ),
 });
 

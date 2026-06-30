@@ -72,14 +72,15 @@ function createMockServer() {
 }
 
 const USER_ID = 'test-session-user';
-const auth = { userId: USER_ID, scopes: ['agent:read'] };
+const API_KEY_ID = 'key-A';
+const auth = { userId: USER_ID, apiKeyId: API_KEY_ID, scopes: ['agent:read', 'notes:write'] };
 
 describe('session context tools', () => {
   let setHandler, getHandler, listHandler;
 
   beforeEach(async () => {
     resetStore();
-    await destroySession(USER_ID);
+    await destroySession(API_KEY_ID);
 
     const server = createMockServer();
     registerSet(server, auth);
@@ -153,17 +154,48 @@ describe('session context tools', () => {
 
   test('session cleanup: destroySession clears all keys', async () => {
     await setHandler({ key: 'temp', value: 'data' });
-    await destroySession(USER_ID);
+    await destroySession(API_KEY_ID);
 
     const result = await getHandler({ key: 'temp' });
     const parsed = JSON.parse(result.content[0].text);
     expect(parsed).toEqual({ value: null });
   });
 
+  test('session store is scoped to apiKeyId, not userId', async () => {
+    const authA = { userId: USER_ID, apiKeyId: 'key-A', scopes: ['agent:read', 'notes:write'] };
+    const authB = { userId: USER_ID, apiKeyId: 'key-B', scopes: ['agent:read', 'notes:write'] };
+
+    const srvA = createMockServer();
+    registerSet(srvA, authA);
+    registerGet(srvA, authA);
+    const setA = srvA.getHandler('set_session_context');
+    const getA = srvA.getHandler('get_session_context');
+
+    const srvB = createMockServer();
+    registerGet(srvB, authB);
+    const getB = srvB.getHandler('get_session_context');
+
+    await setA({ key: 'shared', value: 'from-A' });
+
+    // Same userId, different apiKeyId must NOT read A's value.
+    const bView = JSON.parse((await getB({ key: 'shared' })).content[0].text);
+    expect(bView).toEqual({ value: null });
+
+    // A still reads its own value.
+    const aView = JSON.parse((await getA({ key: 'shared' })).content[0].text);
+    expect(aView).toEqual({ value: 'from-A' });
+
+    // Destroying A's keyspace clears A and never touched B's.
+    await destroySession('key-A');
+    const aAfter = JSON.parse((await getA({ key: 'shared' })).content[0].text);
+    expect(aAfter).toEqual({ value: null });
+  });
+
   describe('scope enforcement', () => {
-    test('set_session_context requires agent:read scope', async () => {
+    test('set_session_context requires notes:write scope', async () => {
       const server = createMockServer();
-      registerSet(server, { userId: USER_ID, scopes: [] });
+      // agent:read alone (a read-only agent) is no longer enough to write scratch.
+      registerSet(server, { userId: USER_ID, apiKeyId: API_KEY_ID, scopes: ['agent:read'] });
       const noScopeHandler = server.getHandler('set_session_context');
 
       const result = await noScopeHandler({ key: 'k', value: 'v' });

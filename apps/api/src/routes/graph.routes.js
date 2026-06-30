@@ -52,7 +52,12 @@ export const graphRoutes = new Elysia({ prefix: '/api/v1/graph' })
         slug: t.String({ minLength: 1 }),
       }),
       query: t.Object({
-        depth: t.Optional(t.String()),
+        depth: t.Optional(
+          t.String({
+            pattern: '^[1-9][0-9]*$',
+            description: 'BFS depth as a positive integer; clamped to MAX_GRAPH_DEPTH server-side',
+          }),
+        ),
       }),
       response: {
         200: GraphResponse,

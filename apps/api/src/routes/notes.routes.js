@@ -73,6 +73,13 @@ export const noteRoutes = new Elysia({ prefix: '/api/v1/notes' })
         ),
         tags: t.Optional(t.Array(t.String({ minLength: 1 }))),
         directoryId: t.Optional(t.Union([t.String({ minLength: 1 }), t.Null()])),
+        metadata: t.Optional(
+          t.Object({
+            source: t.Optional(t.String()),
+            confidence: t.Optional(t.Number({ minimum: 0, maximum: 1 })),
+            importance: t.Optional(t.Integer({ minimum: 1, maximum: 5 })),
+          }),
+        ),
       }),
       response: {
         201: NoteResponse,
@@ -297,6 +304,13 @@ export const noteRoutes = new Elysia({ prefix: '/api/v1/notes' })
         directoryId: t.Optional(t.Union([t.String({ minLength: 1 }), t.Null()])),
         message: t.Optional(t.String()),
         pinned: t.Optional(t.Boolean()),
+        metadata: t.Optional(
+          t.Object({
+            source: t.Optional(t.String()),
+            confidence: t.Optional(t.Number({ minimum: 0, maximum: 1 })),
+            importance: t.Optional(t.Integer({ minimum: 1, maximum: 5 })),
+          }),
+        ),
       }),
       response: {
         200: NoteResponse,

@@ -31,6 +31,7 @@ const mockApiKey = {
   findUnique: mock(() => null),
   update: mock(() => ({})),
 };
+const mockQueryRaw = mock(async () => []);
 
 const mockTransaction = mock(async (cb) =>
   cb({ note: mockNote, link: mockLink, tag: mockTag, revision: mockRevision }),
@@ -46,7 +47,13 @@ mock.module('@prisma/client', () => ({
       this.revision = mockRevision;
       this.apiKey = mockApiKey;
       this.$transaction = mockTransaction;
+      this.$queryRaw = mockQueryRaw;
     }
+  },
+  Prisma: {
+    sql: (strings, ...values) => ({ strings, values, type: 'sql' }),
+    join: (items, sep) => ({ items, sep, type: 'join' }),
+    empty: { type: 'empty' },
   },
 }));
 
@@ -115,6 +122,7 @@ beforeEach(() => {
     }
   }
   mockTransaction.mockReset();
+  mockQueryRaw.mockReset();
   mockBcrypt.hash.mockReset();
   mockBcrypt.compare.mockReset();
   mockJwt.sign.mockReset();

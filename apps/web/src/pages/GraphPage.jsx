@@ -1,21 +1,46 @@
 /**
- * GraphPage — Interactive force-directed graph visualization of notes and links.
+ * GraphPage — knowledge-graph visualization (Cytoscape.js + fcose).
+ *
+ * Renders the typed/weighted/directed graph from `/api/v1/graph`:
+ *   - node colour  ← status
+ *   - node size    ← ego `score` (decayed relevance) when present
+ *   - edge width   ← `weight` (wikilink occurrence count)
+ *   - edge colour  ← `relation` (typed wikilink vocabulary)
+ *   - edge label   ← `relation` (only for typed edges)
+ *   - arrowheads   ← edge direction (from → to)
  */
 
-import { useMemo, useCallback, useRef, useEffect, useState } from 'react';
+import { useMemo, useCallback, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import styled from 'styled-components';
-import ForceGraph2D from 'react-force-graph-2d';
+import CytoscapeComponent from 'react-cytoscapejs';
+import cytoscape from 'cytoscape';
+import fcose from 'cytoscape-fcose';
 import { useGraph } from '../api/hooks.js';
 import { useUIStore } from '../stores/uiStore.js';
+
+// Register the fcose layout once (guard against HMR double-registration).
+if (!cytoscape.__fcoseRegistered) {
+  cytoscape.use(fcose);
+  cytoscape.__fcoseRegistered = true;
+}
 
 const STATUS_COLORS = {
   DRAFT: '#f59e0b',
   PUBLISHED: '#22c55e',
   ARCHIVED: '#9ca3af',
 };
+const DEFAULT_NODE_COLOR = '#6b7280';
 
-const DEFAULT_COLOR = '#6b7280';
+// Typed-wikilink relation vocabulary → edge colour. `null` = plain wikilink.
+const RELATION_COLORS = {
+  supports: '#22c55e',
+  contradicts: '#ef4444',
+  'derived-from': '#3b82f6',
+  refines: '#a855f7',
+  'related-to': '#14b8a6',
+};
+const DEFAULT_EDGE_COLOR = '#4b5563';
 
 const CenteredMessage = styled.div`
   display: flex;
@@ -32,110 +57,182 @@ const GraphContainer = styled.div`
   overflow: hidden;
 `;
 
+const STYLESHEET = [
+  {
+    selector: 'node',
+    style: {
+      'background-color': 'data(color)',
+      width: 'data(size)',
+      height: 'data(size)',
+      label: 'data(label)',
+      color: '#e5e7eb',
+      'font-size': 10,
+      'text-valign': 'bottom',
+      'text-halign': 'center',
+      'text-margin-y': 3,
+      'text-wrap': 'ellipsis',
+      'text-max-width': 120,
+      'min-zoomed-font-size': 7,
+      'border-width': 0,
+    },
+  },
+  {
+    selector: 'edge',
+    style: {
+      width: 'data(width)',
+      'line-color': 'data(color)',
+      'target-arrow-color': 'data(color)',
+      'target-arrow-shape': 'triangle',
+      'arrow-scale': 0.8,
+      'curve-style': 'bezier',
+      label: 'data(label)',
+      'font-size': 8,
+      color: '#9ca3af',
+      'text-rotation': 'autorotate',
+      'text-background-color': '#111827',
+      'text-background-opacity': 0.6,
+      'text-background-padding': 1,
+      opacity: 0.85,
+    },
+  },
+  {
+    selector: 'node:selected',
+    style: { 'border-width': 2, 'border-color': '#e5e7eb' },
+  },
+  {
+    selector: 'node.faded',
+    style: { opacity: 0.25 },
+  },
+  {
+    selector: 'edge.faded',
+    style: { opacity: 0.08 },
+  },
+];
+
+const LAYOUT = {
+  name: 'fcose',
+  quality: 'default',
+  animate: true,
+  animationDuration: 500,
+  randomize: true,
+  fit: true,
+  padding: 60,
+  nodeSeparation: 90,
+  idealEdgeLength: 110,
+};
+
 export default function GraphPage() {
   const navigate = useNavigate();
   const { data, isLoading, error } = useGraph();
-  const fgRef = useRef(null);
-  const containerRef = useRef(null);
-  const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
+  const cyRef = useRef(null);
 
-  // Hide right pane on mount, restore on unmount
+  // Hide right pane on mount, restore on unmount.
   const prevRightPane = useRef(null);
   useEffect(() => {
     const state = useUIStore.getState();
     prevRightPane.current = state.rightPaneOpen;
-    if (state.rightPaneOpen) {
-      useUIStore.setState({ rightPaneOpen: false });
-    }
+    if (state.rightPaneOpen) useUIStore.setState({ rightPaneOpen: false });
     return () => {
-      if (prevRightPane.current) {
-        useUIStore.setState({ rightPaneOpen: true });
-      }
+      if (prevRightPane.current) useUIStore.setState({ rightPaneOpen: true });
     };
   }, []);
 
-  // Measure container size
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
+  const elements = useMemo(() => {
+    if (!data) return [];
 
-    const observer = new ResizeObserver((entries) => {
-      const { width, height } = entries[0].contentRect;
-      setDimensions({ width: Math.floor(width), height: Math.floor(height) });
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
+    // Node size from ego `score` (decayed relevance); fall back to a flat size
+    // for the full graph where score is absent.
+    const scores = (data.nodes ?? [])
+      .map((n) => n.score)
+      .filter((s) => typeof s === 'number');
+    const maxScore = scores.length ? Math.max(...scores) : 0;
+    const sizeFor = (score) => {
+      if (typeof score !== 'number' || maxScore <= 0) return 22;
+      return 16 + (score / maxScore) * 26; // 16–42px
+    };
 
-  // Center graph after data loads
-  useEffect(() => {
-    if (fgRef.current && data?.nodes?.length) {
-      setTimeout(() => fgRef.current?.zoomToFit(400, 60), 500);
-    }
-  }, [data]);
-
-  const graphData = useMemo(() => {
-    if (!data) return { nodes: [], links: [] };
     const nodes = (data.nodes ?? []).map((n) => ({
-      id: n.id,
-      label: n.title,
-      slug: n.slug,
-      status: n.status,
-      color: STATUS_COLORS[n.status] ?? DEFAULT_COLOR,
+      data: {
+        id: n.id,
+        label: n.title,
+        slug: n.slug,
+        status: n.status,
+        color: STATUS_COLORS[n.status] ?? DEFAULT_NODE_COLOR,
+        size: sizeFor(n.score),
+        hop: n.hop ?? null,
+      },
     }));
-    const links = (data.edges ?? []).map((e) => ({
-      source: e.fromId,
-      target: e.toId,
-    }));
-    return { nodes, links };
+
+    const nodeIds = new Set(nodes.map((n) => n.data.id));
+    const edges = (data.edges ?? [])
+      .filter((e) => e.toId && nodeIds.has(e.fromId) && nodeIds.has(e.toId))
+      .map((e, i) => {
+        const weight = typeof e.weight === 'number' ? e.weight : 1;
+        return {
+          data: {
+            id: `e${i}-${e.fromId}-${e.toId}-${e.relation ?? ''}`,
+            source: e.fromId,
+            target: e.toId,
+            relation: e.relation ?? null,
+            label: e.relation ?? '',
+            width: 1 + Math.min(weight, 6), // 2–7px
+            color: RELATION_COLORS[e.relation] ?? DEFAULT_EDGE_COLOR,
+          },
+        };
+      });
+
+    return [...nodes, ...edges];
   }, [data]);
 
-  const handleNodeClick = useCallback(
-    (node) => {
-      if (node.slug) navigate(`/notes/${node.slug}`);
+  const handleCy = useCallback(
+    (cy) => {
+      cyRef.current = cy;
+      cy.removeAllListeners();
+
+      // Click a node → open the note.
+      cy.on('tap', 'node', (evt) => {
+        const slug = evt.target.data('slug');
+        if (slug) navigate(`/notes/${slug}`);
+      });
+
+      // Hover a node → highlight its neighbourhood.
+      cy.on('mouseover', 'node', (evt) => {
+        const keep = evt.target.closedNeighborhood();
+        cy.elements().addClass('faded');
+        keep.removeClass('faded');
+      });
+      cy.on('mouseout', 'node', () => cy.elements().removeClass('faded'));
     },
     [navigate],
   );
 
-  const paintNode = useCallback((node, ctx, globalScale) => {
-    const radius = 5;
-    const fontSize = Math.max(12 / globalScale, 1.5);
-    ctx.beginPath();
-    ctx.arc(node.x, node.y, radius, 0, 2 * Math.PI);
-    ctx.fillStyle = node.color ?? DEFAULT_COLOR;
-    ctx.fill();
-    if (globalScale > 0.6) {
-      ctx.font = `${fontSize}px sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'top';
-      ctx.fillStyle = '#e5e7eb';
-      ctx.fillText(node.label ?? '', node.x, node.y + radius + 2);
-    }
-  }, []);
+  // Re-run layout + fit whenever the element set changes.
+  useEffect(() => {
+    const cy = cyRef.current;
+    if (!cy || elements.length === 0) return;
+    cy.layout(LAYOUT).run();
+  }, [elements]);
 
   if (isLoading) return <CenteredMessage>Loading graph…</CenteredMessage>;
-  if (error) return <CenteredMessage $color="var(--color-danger)">Failed to load graph: {error.message}</CenteredMessage>;
-  if (graphData.nodes.length === 0) return <CenteredMessage>No notes to display.</CenteredMessage>;
+  if (error)
+    return (
+      <CenteredMessage $color="var(--color-danger)">
+        Failed to load graph: {error.message}
+      </CenteredMessage>
+    );
+  if (elements.length === 0) return <CenteredMessage>No notes to display.</CenteredMessage>;
 
   return (
-    <GraphContainer ref={containerRef}>
-      <ForceGraph2D
-        ref={fgRef}
-        width={dimensions.width}
-        height={dimensions.height}
-        graphData={graphData}
-        nodeCanvasObject={paintNode}
-        nodePointerAreaPaint={(node, color, ctx) => {
-          ctx.beginPath();
-          ctx.arc(node.x, node.y, 5, 0, 2 * Math.PI);
-          ctx.fillStyle = color;
-          ctx.fill();
-        }}
-        onNodeClick={handleNodeClick}
-        linkColor={() => '#4b5563'}
-        linkWidth={1}
-        linkDirectionalArrowLength={4}
-        linkDirectionalArrowRelPos={1}
+    <GraphContainer>
+      <CytoscapeComponent
+        elements={elements}
+        stylesheet={STYLESHEET}
+        layout={LAYOUT}
+        cy={handleCy}
+        style={{ width: '100%', height: '100%' }}
+        minZoom={0.2}
+        maxZoom={3}
+        wheelSensitivity={0.2}
       />
     </GraphContainer>
   );

@@ -8,6 +8,7 @@ import {
 } from '@mycelium/shared';
 import { prisma } from '../db.js';
 import { LinkService } from './link.service.js';
+import { DirectoryService } from './directory.service.js';
 import { sanitizeMarkdown } from '../utils/sanitize.js';
 
 /**
@@ -97,6 +98,83 @@ export const NoteService = {
     });
 
     return note;
+  },
+
+  /**
+   * Recall-then-upsert a durable agent memory.
+   *
+   * Resolves an existing memory by EXACT title within the caller's own notes
+   * that carry the `agent-memory` tag — matched on title, never slug (slugs are
+   * globally unique and the collision check is not user-scoped). When a match
+   * is found:
+   *   - mode 'append' (default): append a timestamped section to the note
+   *   - mode 'replace' (explicit only): overwrite the existing content
+   * When no match is found, or mode is 'new', a fresh PUBLISHED memory note is
+   * created in the user's `memories` directory. The `agent-memory` tag is always
+   * applied and de-duplicated.
+   *
+   * @param {string} userId
+   * @param {{ title: string, content: string, tags?: string[], mode?: 'append'|'replace'|'new', authType?: string, apiKeyId?: string, apiKeyName?: string }} data
+   * @returns {Promise<{ id: string, slug: string, action: 'created'|'updated', excerpt: string }>}
+   */
+  async upsertMemory(userId, data) {
+    const { title, content, tags = [], mode = 'append', authType, apiKeyId, apiKeyName } = data;
+    const auth = { authType, apiKeyId, apiKeyName };
+    const memoryTags = [...new Set([...tags, 'agent-memory'])];
+    const memoriesDirectory = await DirectoryService.findOrCreateMemoriesDirectory(userId);
+
+    // mode 'new' preserves the legacy always-create behavior.
+    if (mode === 'new') {
+      const created = await NoteService.createNote(userId, {
+        title,
+        content,
+        status: 'PUBLISHED',
+        tags: memoryTags,
+        directoryId: memoriesDirectory.id,
+        ...auth,
+      });
+      return { id: created.id, slug: created.slug, action: 'created', excerpt: created.excerpt };
+    }
+
+    // Recall: resolve an existing agent-memory by EXACT title, scoped to the
+    // owning user. findFirst on title (NOT slug). orderBy keeps the freshest.
+    const existing = await prisma.note.findFirst({
+      where: {
+        userId,
+        title,
+        status: { not: 'ARCHIVED' },
+        tags: { some: { name: 'agent-memory' } },
+      },
+      orderBy: { updatedAt: 'desc' },
+      include: { tags: true },
+    });
+
+    // Nothing to consolidate → create a new memory.
+    if (!existing) {
+      const created = await NoteService.createNote(userId, {
+        title,
+        content,
+        status: 'PUBLISHED',
+        tags: memoryTags,
+        directoryId: memoriesDirectory.id,
+        ...auth,
+      });
+      return { id: created.id, slug: created.slug, action: 'created', excerpt: created.excerpt };
+    }
+
+    // Consolidate into the existing memory.
+    const nextContent =
+      mode === 'replace'
+        ? content
+        : `${existing.content}\n\n## Update ${new Date().toISOString()}\n\n${content}`;
+    const mergedTags = [...new Set([...existing.tags.map((t) => t.name), ...memoryTags])];
+
+    const { note } = await NoteService.updateNote(userId, existing.slug, {
+      content: nextContent,
+      tags: mergedTags,
+      ...auth,
+    });
+    return { id: note.id, slug: note.slug, action: 'updated', excerpt: note.excerpt };
   },
 
   /**

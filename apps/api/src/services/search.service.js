@@ -122,6 +122,8 @@ export const SearchService = {
         slug: note.slug,
         title: note.title,
         excerpt: note.excerpt,
+        score: null,
+        snippet: note.excerpt,
         tags: note.tags.map((tag) => tag.name),
         updatedAt: note.updatedAt.toISOString(),
       }));

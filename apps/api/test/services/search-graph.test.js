@@ -170,6 +170,8 @@ describe('SearchService.getContext — ordering', () => {
       slug: 'a',
       title: 'A',
       excerpt: null,
+      score: null,
+      snippet: null,
       tags: ['t'],
       updatedAt: now.toISOString(),
     });

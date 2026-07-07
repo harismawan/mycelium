@@ -8,7 +8,10 @@
     "./markdown": "./markdown.js",
     "./slug": "./slug.js",
     "./constants": "./constants.js",
-    "./redis": "./redis.js"
+    "./redis": "./redis.js",
+    "./otel": "./otel.js",
+    "./logger-otel": "./logger-otel.js",
+    "./tracing": "./tracing.js"
   },
   "dependencies": {
     "@opentelemetry/api": "^1.9.1",

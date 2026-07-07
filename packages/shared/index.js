@@ -40,7 +40,3 @@ export {
   FORGET_STALE_DEFAULT_DAYS,
   FORGET_MIN_IMPORTANCE,
 } from './constants.js';
-
-export { startOtel } from './otel.js';
-export { traceContextMixin, withTraceContext } from './logger-otel.js';
-export { traceFn, tracedService } from './tracing.js';

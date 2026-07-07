@@ -383,17 +383,25 @@ export const SearchService = {
     // Graph-aware expansion: use a lean seed query (ts_rank AS rank), blend with
     // graph co-citation scores, then return the minimal canonical shape.
     if (opts.expand) {
-      const seedRows = await prisma.$queryRaw`
+      const runSeed = (seedTsQuery) => prisma.$queryRaw`
         SELECT n."id", n."slug", n."title", n."excerpt", n."updatedAt",
-               ts_rank(n."searchVector", ${tsQuery}) AS rank
+               ts_rank(n."searchVector", ${seedTsQuery}) AS rank
         FROM "Note" n
         WHERE n."userId" = ${userId}
           AND n."status" != 'ARCHIVED'
           ${namespaceDirId ? Prisma.sql`AND n."directoryId" = ${namespaceDirId}` : Prisma.empty}
-          AND n."searchVector" @@ ${tsQuery}
+          AND n."searchVector" @@ ${seedTsQuery}
         ORDER BY rank DESC, n."updatedAt" DESC
         LIMIT ${limit}
       `;
+
+      let seedRows = await runSeed(tsQuery);
+      if (seedRows.length === 0) {
+        const orText = buildOrQuery(opts.topic);
+        if (orText) {
+          seedRows = await runSeed(Prisma.sql`websearch_to_tsquery('english', ${orText})`);
+        }
+      }
 
       if (seedRows.length === 0) return [];
 
@@ -470,22 +478,32 @@ export const SearchService = {
     }
 
     // Flat lexical path (expand=false / default): preserve the original behavior.
-    let results = await prisma.$queryRaw`
+    const runFlatLexical = (flatTsQuery) => prisma.$queryRaw`
       SELECT n."id", n."slug", n."title", n."excerpt", n."source", n."confidence", n."importance", n."updatedAt",
              n."pinned",
-             ts_rank(n."searchVector", ${tsQuery}) AS score,
-             ts_headline('english', n."content", ${tsQuery},
+             ts_rank(n."searchVector", ${flatTsQuery}) AS score,
+             ts_headline('english', n."content", ${flatTsQuery},
                'MaxFragments=2, MaxWords=30') AS snippet
       FROM "Note" n
       WHERE n."userId" = ${userId}
         AND n."status" != 'ARCHIVED'
         ${namespaceDirId ? Prisma.sql`AND n."directoryId" = ${namespaceDirId}` : Prisma.empty}
-        AND n."searchVector" @@ ${tsQuery}
-      ORDER BY n."pinned" DESC, ts_rank(n."searchVector", ${tsQuery}) * (1 + COALESCE(n."importance", 0) * ${IMPORTANCE_BOOST}) * exp(${-MEMORY_DECAY_RATE}::float8 * EXTRACT(EPOCH FROM (now() - COALESCE(n."lastAccessedAt", n."createdAt"))) / 86400.0) DESC, COALESCE(n."lastAccessedAt", n."createdAt") DESC
+        AND n."searchVector" @@ ${flatTsQuery}
+      ORDER BY n."pinned" DESC, ts_rank(n."searchVector", ${flatTsQuery}) * (1 + COALESCE(n."importance", 0) * ${IMPORTANCE_BOOST}) * exp(${-MEMORY_DECAY_RATE}::float8 * EXTRACT(EPOCH FROM (now() - COALESCE(n."lastAccessedAt", n."createdAt"))) / 86400.0) DESC, COALESCE(n."lastAccessedAt", n."createdAt") DESC
       LIMIT ${limit}
     `;
 
-    // Lexical miss (typo / paraphrase) → pg_trgm fuzzy fallback on title.
+    let results = await runFlatLexical(tsQuery);
+
+    // Tier 2: OR-relax before the fuzzy fallback.
+    if (results.length === 0) {
+      const orText = buildOrQuery(opts.topic);
+      if (orText) {
+        results = await runFlatLexical(Prisma.sql`websearch_to_tsquery('english', ${orText})`);
+      }
+    }
+
+    // Tier 3: lexical miss (typo / paraphrase) → pg_trgm fuzzy fallback on title.
     if (results.length === 0) {
       results = await prisma.$queryRaw`
         SELECT n."id", n."slug", n."title", n."excerpt", n."source", n."confidence", n."importance", n."updatedAt",

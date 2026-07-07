@@ -7,12 +7,16 @@ const mockNote = {
   findMany: mock(() => []),
   findFirst: mock(() => null),
 };
+const mockLink = {
+  findMany: mock(() => []),
+};
 const mockQueryRaw = mock(() => []);
 
 mock.module('@prisma/client', () => ({
   PrismaClient: class {
     constructor() {
       this.note = mockNote;
+      this.link = mockLink;
       this.$queryRaw = mockQueryRaw;
     }
   },
@@ -36,6 +40,8 @@ const userId = 'user_1';
 beforeEach(() => {
   mockNote.findMany.mockReset();
   mockNote.findFirst.mockReset();
+  mockLink.findMany.mockReset();
+  mockLink.findMany.mockResolvedValue([]);
   mockQueryRaw.mockReset();
   mockEmbedText.mockReset();
   mockEmbedText.mockResolvedValue(null);
@@ -271,5 +277,73 @@ describe('SearchService.getContext fuzzy fallback', () => {
     expect(mockQueryRaw).toHaveBeenCalledTimes(2); // search + tagRows, NO fallback
     const allSql = JSON.stringify(mockQueryRaw.mock.calls);
     expect(allSql).not.toContain('similarity');
+  });
+});
+
+describe('SearchService.getContext OR relaxation', () => {
+  test('relaxes topic to OR when strict misses, before trigram', async () => {
+    mockQueryRaw
+      .mockResolvedValueOnce([]) // tier 1 strict topic: miss
+      .mockResolvedValueOnce([
+        // tier 2 OR: hit
+        {
+          id: 'n1',
+          slug: 'api-deploy',
+          title: 'API deployment',
+          excerpt: 'localhost mycelium',
+          source: null,
+          confidence: null,
+          importance: null,
+          updatedAt: new Date('2026-05-05T00:00:00.000Z'),
+          score: 0.3,
+          snippet: '<b>api</b>',
+        },
+      ])
+      .mockResolvedValueOnce([]); // tag rows
+
+    const out = await SearchService.getContext(userId, {
+      topic: 'api localhost mycelium deployment',
+    });
+
+    // strict + OR + tagRows = 3 calls; trigram NOT reached.
+    expect(mockQueryRaw).toHaveBeenCalledTimes(3);
+    const orSql = JSON.stringify(mockQueryRaw.mock.calls[1]);
+    expect(orSql).toContain('api OR localhost OR mycelium OR deployment');
+    const allSql = JSON.stringify(mockQueryRaw.mock.calls);
+    expect(allSql).not.toContain('similarity'); // trigram skipped
+    expect(out).toHaveLength(1);
+    expect(out[0].slug).toBe('api-deploy');
+  });
+});
+
+describe('SearchService.getContext expand OR relaxation', () => {
+  test('relaxes expand seed to OR when strict seed query misses', async () => {
+    // seed strict miss -> seed OR hit. Neighbors + tags follow via LinkService/_attachTags.
+    mockQueryRaw
+      .mockResolvedValueOnce([]) // strict seed: miss
+      .mockResolvedValueOnce([
+        // OR seed: hit
+        {
+          id: 'n1',
+          slug: 'api-deploy',
+          title: 'API deployment',
+          excerpt: 'localhost mycelium',
+          updatedAt: new Date('2026-05-05T00:00:00.000Z'),
+          rank: 0.3,
+        },
+      ])
+      .mockResolvedValueOnce([]); // _attachTags tag rows
+
+    const out = await SearchService.getContext(userId, {
+      topic: 'api localhost mycelium deployment',
+      expand: true,
+    });
+
+    expect(mockQueryRaw).toHaveBeenCalledTimes(3);
+    expect(mockLink.findMany).toHaveBeenCalledTimes(2);
+    const orSql = JSON.stringify(mockQueryRaw.mock.calls[1]);
+    expect(orSql).toContain('api OR localhost OR mycelium OR deployment');
+    expect(out).toHaveLength(1);
+    expect(out[0].slug).toBe('api-deploy');
   });
 });

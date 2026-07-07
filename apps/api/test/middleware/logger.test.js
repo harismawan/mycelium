@@ -1,12 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 
+import { captureLoggerRecord } from '../helpers/capture-logger.js';
+
 describe('applyLogger', () => {
   test('emits an http access record with parity keys', async () => {
-    const child = Bun.spawn({
-      cmd: [
-        'bun',
-        '-e',
-        `
+    const { logEntry: record } = await captureLoggerRecord({
+      script: `
           import { Elysia } from 'elysia';
           import { applyLogger } from './src/middleware/logger.js';
           import { requestIdMiddleware } from './src/middleware/request-id.js';
@@ -25,30 +24,7 @@ describe('applyLogger', () => {
           logger.flush?.();
           await new Promise((r) => setTimeout(r, 50));
         `,
-      ],
-      cwd: process.cwd(),
-      env: {
-        ...process.env,
-        LOG_BODY: 'false',
-        NODE_ENV: 'test',
-      },
-      stderr: 'pipe',
-      stdout: 'pipe',
     });
-
-    const [stdout, stderr, exitCode] = await Promise.all([
-      new Response(child.stdout).text(),
-      new Response(child.stderr).text(),
-      child.exited,
-    ]);
-
-    expect(exitCode, stderr).toBe(0);
-
-    const record = stdout
-      .split('\n')
-      .filter(Boolean)
-      .map((l) => JSON.parse(l))
-      .find((r) => r.msg === 'http');
 
     expect(record).toBeDefined();
     expect(record).toHaveProperty('requestId', 'logger-test-id');
@@ -64,5 +40,40 @@ describe('applyLogger', () => {
     expect(typeof record.t).toBe('string');
     expect(record).not.toHaveProperty('requestBody');
     expect(record).not.toHaveProperty('responseBody');
+  });
+
+  test('redacts password from logged request body when LOG_BODY is true', async () => {
+    const { logEntry: record } = await captureLoggerRecord({
+      script: `
+          import { Elysia } from 'elysia';
+          import { applyLogger } from './src/middleware/logger.js';
+          import { requestIdMiddleware } from './src/middleware/request-id.js';
+          import { logger } from './src/utils/logger.js';
+
+          const app = new Elysia().use(requestIdMiddleware);
+          applyLogger(app).post('/login', ({ body }) => ({ ok: true, email: body.email }));
+
+          await app.handle(new Request('http://localhost/login', {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              'x-request-id': 'redact-test-id',
+            },
+            body: JSON.stringify({
+              email: 'user@example.com',
+              password: 'plaintext-password',
+            }),
+          }));
+          logger.flush?.();
+          await new Promise((r) => setTimeout(r, 50));
+        `,
+      env: {
+        LOG_BODY: 'true',
+      },
+    });
+
+    expect(record).toBeDefined();
+    expect(record.requestBody.password).toBe('[REDACTED]');
+    expect(record.requestBody.password).not.toBe('plaintext-password');
   });
 });

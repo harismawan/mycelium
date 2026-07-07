@@ -161,78 +161,70 @@ export const SearchService = {
     const queryVector = await embedText(query).catch(() => null);
 
     if (!queryVector) {
-      const rankSql = Prisma.sql`ts_rank(n."searchVector", ${tsQuery})`;
+      const runLexical = async (tsQuery) => {
+        const rankSql = Prisma.sql`ts_rank(n."searchVector", ${tsQuery})`;
 
-      // Build dynamic WHERE clauses
-      const conditions = [
-        Prisma.sql`n."userId" = ${userId}`,
-        Prisma.sql`n."searchVector" @@ ${tsQuery}`,
-      ];
+        const conditions = [
+          Prisma.sql`n."userId" = ${userId}`,
+          Prisma.sql`n."searchVector" @@ ${tsQuery}`,
+        ];
 
-      // Status filter: use provided status or default to excluding ARCHIVED
-      if (filters.status) {
-        conditions.push(Prisma.sql`n."status" = ${filters.status}::"NoteStatus"`);
-      } else {
-        conditions.push(Prisma.sql`n."status" != 'ARCHIVED'`);
-      }
-
-      // Cursor-based pagination. The keyset MUST mirror the ORDER BY tuple
-      // (rank DESC, updatedAt DESC, id DESC) or pagination skips/duplicates rows.
-      if (filters.cursor) {
-        const cursor = decodeCursor(filters.cursor);
-        if (cursor.rank === null) {
-          // Legacy id-only cursor (pre-compound pagination).
-          conditions.push(Prisma.sql`n."id" < ${cursor.id}`);
-        } else if (cursor.updatedAt === null) {
-          // Transitional cursor issued before the recency tiebreak shipped:
-          // fall back to the 2-key (rank, id) keyset.
-          conditions.push(
-            Prisma.sql`(${rankSql} < ${cursor.rank} OR (${rankSql} = ${cursor.rank} AND n."id" < ${cursor.id}))`,
-          );
+        if (filters.status) {
+          conditions.push(Prisma.sql`n."status" = ${filters.status}::"NoteStatus"`);
         } else {
-          const cursorUpdatedAt = new Date(cursor.updatedAt);
-          conditions.push(
-            Prisma.sql`(
-              ${rankSql} < ${cursor.rank}
-              OR (${rankSql} = ${cursor.rank} AND n."updatedAt" < ${cursorUpdatedAt})
-              OR (${rankSql} = ${cursor.rank} AND n."updatedAt" = ${cursorUpdatedAt} AND n."id" < ${cursor.id})
-            )`,
-          );
+          conditions.push(Prisma.sql`n."status" != 'ARCHIVED'`);
         }
-      }
 
-      const whereClause = Prisma.sql`WHERE ${Prisma.join(conditions, ' AND ')}`;
+        if (filters.cursor) {
+          const cursor = decodeCursor(filters.cursor);
+          if (cursor.rank === null) {
+            conditions.push(Prisma.sql`n."id" < ${cursor.id}`);
+          } else if (cursor.updatedAt === null) {
+            conditions.push(
+              Prisma.sql`(${rankSql} < ${cursor.rank} OR (${rankSql} = ${cursor.rank} AND n."id" < ${cursor.id}))`,
+            );
+          } else {
+            const cursorUpdatedAt = new Date(cursor.updatedAt);
+            conditions.push(
+              Prisma.sql`(
+                ${rankSql} < ${cursor.rank}
+                OR (${rankSql} = ${cursor.rank} AND n."updatedAt" < ${cursorUpdatedAt})
+                OR (${rankSql} = ${cursor.rank} AND n."updatedAt" = ${cursorUpdatedAt} AND n."id" < ${cursor.id})
+              )`,
+            );
+          }
+        }
 
-      // Tag filter: join with the implicit _NoteToTag and Tag tables
-      let joinClause = Prisma.empty;
-      if (filters.tag) {
-        joinClause = Prisma.sql`
-          INNER JOIN "_NoteToTag" nt ON nt."A" = n."id"
-          INNER JOIN "Tag" t ON t."id" = nt."B" AND t."name" = ${filters.tag}`;
-      }
+        const whereClause = Prisma.sql`WHERE ${Prisma.join(conditions, ' AND ')}`;
 
-      const results = await prisma.$queryRaw`
-        SELECT n."id", n."slug", n."title", n."excerpt", n."status", n."updatedAt",
-               ${rankSql} AS rank
-        FROM "Note" n
-        ${joinClause}
-        ${whereClause}
-        ORDER BY rank DESC, n."updatedAt" DESC, n."id" DESC
-        LIMIT ${limit + 1}
-      `;
+        let joinClause = Prisma.empty;
+        if (filters.tag) {
+          joinClause = Prisma.sql`
+            INNER JOIN "_NoteToTag" nt ON nt."A" = n."id"
+            INNER JOIN "Tag" t ON t."id" = nt."B" AND t."name" = ${filters.tag}`;
+        }
 
-      const hasMore = results.length > limit;
-      if (hasMore) results.pop();
+        const results = await prisma.$queryRaw`
+          SELECT n."id", n."slug", n."title", n."excerpt", n."status", n."updatedAt",
+                 ${rankSql} AS rank
+          FROM "Note" n
+          ${joinClause}
+          ${whereClause}
+          ORDER BY rank DESC, n."updatedAt" DESC, n."id" DESC
+          LIMIT ${limit + 1}
+        `;
 
-      // Encode the cursor from the full row (needs updatedAt) BEFORE stripping it.
-      const nextCursor = hasMore ? encodeCursor(results[results.length - 1]) : null;
+        const hasMore = results.length > limit;
+        if (hasMore) results.pop();
+        const nextCursor = hasMore ? encodeCursor(results[results.length - 1]) : null;
 
-      // updatedAt is selected only to drive ordering + the keyset cursor; strip it
-      // so the public SearchResponse shape (id/slug/title/excerpt/status/rank) is unchanged.
-      return {
-        notes: results.map(({ updatedAt, ...note }) => note),
-        nextCursor,
+        return {
+          notes: results.map(({ updatedAt, ...note }) => note),
+          nextCursor,
+        };
       };
+
+      return runLexical(tsQuery);
     }
 
     // ---- fused RRF path -------------------------------------------------------

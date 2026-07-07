@@ -28,6 +28,32 @@ function clampExpandDepth(depth) {
   return Math.min(Math.max(d, 1), MAX_EXPAND_DEPTH);
 }
 
+/** tsquery operator tokens that must never survive into a rebuilt OR query. */
+const TSQUERY_OPERATOR_TOKENS = new Set(['OR', 'AND', 'NOT', '-', '|', '&', '!', '<->']);
+
+/**
+ * Rebuild a natural-language query as an OR-of-terms string for a wider,
+ * recall-first pass. The result is passed as a bound parameter to
+ * `websearch_to_tsquery`, which treats a literal `OR` between words as
+ * disjunction — so `"api localhost mycelium"` becomes `"api OR localhost OR
+ * mycelium"` and matches notes containing *any* term (ranked by ts_rank).
+ *
+ * Operator-only tokens are dropped so a user-supplied `OR`/`-`/`|` cannot
+ * inject stray tsquery syntax. Returns `null` when fewer than 2 usable tokens
+ * remain (the OR variant would be identical to the strict query).
+ *
+ * @param {string} query
+ * @returns {string | null}
+ */
+function buildOrQuery(query) {
+  const tokens = String(query ?? '')
+    .trim()
+    .split(/\s+/)
+    .filter((t) => t.length > 0 && !TSQUERY_OPERATOR_TOKENS.has(t));
+  if (tokens.length < 2) return null;
+  return tokens.join(' OR ');
+}
+
 /** Min-max normalize a value into 0..1; returns 1 when all values are equal. */
 function minMaxNormalize(value, min, max) {
   if (max === min) return 1;

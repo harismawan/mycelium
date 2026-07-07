@@ -1,4 +1,5 @@
 import { Elysia } from 'elysia';
+import { opentelemetry } from '@elysia/opentelemetry';
 import { cors } from '@elysiajs/cors';
 import { swagger } from '@elysiajs/swagger';
 import { applyLogger } from './middleware/logger.js';
@@ -46,16 +47,19 @@ const app = new Elysia()
     }));
     set.status = 500;
     return { error: 'Internal server error' };
-  })
-  .use(
-    cors({
-      origin: process.env.CORS_ORIGIN || true,
-      credentials: true,
-      allowedHeaders: ['Content-Type', 'Authorization', 'x-csrf-token', 'x-request-id'],
-      exposeHeaders: ['x-request-id'],
-      methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
-    }),
-  );
+  });
+
+app.use(opentelemetry({ serviceName: 'mycelium-api' }));
+
+app.use(
+  cors({
+    origin: process.env.CORS_ORIGIN || true,
+    credentials: true,
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-csrf-token', 'x-request-id'],
+    exposeHeaders: ['x-request-id'],
+    methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+  }),
+);
 
 if (shouldEnableSwagger) {
   app.use(

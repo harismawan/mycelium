@@ -40,4 +40,3 @@ export {
   FORGET_STALE_DEFAULT_DAYS,
   FORGET_MIN_IMPORTANCE,
 } from './constants.js';
-

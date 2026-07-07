@@ -2,15 +2,31 @@
   "name": "@mycelium/shared",
   "version": "0.1.0",
   "type": "module",
+  "sideEffects": false,
   "main": "index.js",
   "exports": {
     ".": "./index.js",
     "./markdown": "./markdown.js",
     "./slug": "./slug.js",
     "./constants": "./constants.js",
-    "./redis": "./redis.js"
+    "./redis": "./redis.js",
+    "./otel": "./otel.js",
+    "./logger-otel": "./logger-otel.js",
+    "./tracing": "./tracing.js"
   },
   "dependencies": {
+    "@opentelemetry/api": "^1.9.1",
+    "@opentelemetry/exporter-metrics-otlp-grpc": "^0.218.0",
+    "@opentelemetry/exporter-trace-otlp-grpc": "^0.218.0",
+    "@opentelemetry/host-metrics": "^0.38.3",
+    "@opentelemetry/instrumentation-pg": "^0.70.0",
+    "@opentelemetry/instrumentation-undici": "^0.28.0",
+    "@opentelemetry/resources": "^2.7.1",
+    "@opentelemetry/sdk-metrics": "^2.7.1",
+    "@opentelemetry/sdk-node": "^0.218.0",
+    "@opentelemetry/sdk-trace-node": "^2.7.1",
+    "@opentelemetry/semantic-conventions": "^1.41.1",
+    "@prisma/instrumentation": "^7",
     "rehype-raw": "^7.0.0",
     "rehype-sanitize": "^6.0.0",
     "rehype-stringify": "^10.0.1",
@@ -20,5 +36,8 @@
     "remark-stringify": "^11.0.0",
     "unified": "^11.0.5",
     "yaml": "^2.8.3"
+  },
+  "devDependencies": {
+    "@opentelemetry/context-async-hooks": "^2.7.1"
   }
 }

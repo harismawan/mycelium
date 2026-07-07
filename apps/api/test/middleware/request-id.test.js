@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
+import { describe, test, expect } from 'bun:test';
 import { Elysia } from 'elysia';
 import {
   REQUEST_ID_PATTERN,
@@ -7,6 +7,7 @@ import {
   requestIdMiddleware,
 } from '../../src/middleware/request-id.js';
 import { applyLogger } from '../../src/middleware/logger.js';
+import { captureLoggerRecord } from '../helpers/capture-logger.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -26,16 +27,6 @@ function buildApp() {
   return new Elysia()
     .use(requestIdMiddleware)
     .get('/test', (ctx) => ({ ok: true, requestId: ctx.requestId }));
-}
-
-/**
- * Build an app with both request ID middleware and logger applied.
- */
-function buildAppWithLogger() {
-  const app = new Elysia().use(requestIdMiddleware);
-  applyLogger(app);
-  app.get('/test', (ctx) => ({ ok: true, requestId: ctx.requestId }));
-  return app;
 }
 
 /**
@@ -74,6 +65,41 @@ async function makeRequest(app, path = '/test', opts = {}) {
     headers['x-request-id'] = opts.requestId;
   }
   return app.handle(new Request(`http://localhost${path}`, { headers }));
+}
+
+async function captureRequestIdLoggerRecord(opts = {}) {
+  const { records, logEntry } = await captureLoggerRecord({
+    script: `
+        import { Elysia } from 'elysia';
+        import { applyLogger } from './src/middleware/logger.js';
+        import { requestIdMiddleware } from './src/middleware/request-id.js';
+        import { logger } from './src/utils/logger.js';
+
+        const headers = {};
+        if (process.env.TEST_REQUEST_ID) {
+          headers['x-request-id'] = process.env.TEST_REQUEST_ID;
+        }
+
+        const app = new Elysia().use(requestIdMiddleware);
+        applyLogger(app).get('/test', (ctx) => ({ ok: true, requestId: ctx.requestId }));
+
+        const res = await app.handle(new Request('http://localhost/test', { headers }));
+        process.stdout.write(JSON.stringify({
+          kind: 'response',
+          requestId: res.headers.get('x-request-id'),
+        }) + '\\n');
+        logger.flush?.();
+        await new Promise((r) => setTimeout(r, 50));
+      `,
+    env: {
+      TEST_REQUEST_ID: opts.requestId ?? '',
+    },
+  });
+
+  return {
+    logEntry,
+    responseId: records.find((record) => record.kind === 'response')?.requestId,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -331,55 +357,24 @@ describe('Request ID Middleware — Elysia context', () => {
 // ---------------------------------------------------------------------------
 
 describe('Request ID Middleware — log enrichment', () => {
-  let logs;
-  let originalLog;
-
-  beforeEach(() => {
-    logs = [];
-    originalLog = console.log;
-    console.log = (...args) => logs.push(args.join(' '));
-  });
-
-  afterEach(() => {
-    console.log = originalLog;
-  });
-
   test('logger includes requestId in JSON output', async () => {
-    const app = buildAppWithLogger();
-    const res = await makeRequest(app, '/test', { requestId: 'log-test-id' });
+    const { logEntry } = await captureRequestIdLoggerRecord({ requestId: 'log-test-id' });
 
-    expect(res.status).toBe(200);
-
-    // Wait a tick for onAfterResponse to fire
-    await new Promise((r) => setTimeout(r, 50));
-
-    expect(logs.length).toBeGreaterThanOrEqual(1);
-    const logEntry = JSON.parse(logs[logs.length - 1]);
+    expect(logEntry).toBeDefined();
     expect(logEntry.requestId).toBe('log-test-id');
   });
 
   test('requestId in log matches the X-Request-ID response header', async () => {
-    const app = buildAppWithLogger();
-    const res = await makeRequest(app, '/test');
+    const { logEntry, responseId } = await captureRequestIdLoggerRecord();
 
-    expect(res.status).toBe(200);
-    const responseId = res.headers.get('x-request-id');
-
-    await new Promise((r) => setTimeout(r, 50));
-
-    expect(logs.length).toBeGreaterThanOrEqual(1);
-    const logEntry = JSON.parse(logs[logs.length - 1]);
+    expect(logEntry).toBeDefined();
     expect(logEntry.requestId).toBe(responseId);
   });
 
   test('log entry contains expected fields alongside requestId', async () => {
-    const app = buildAppWithLogger();
-    await makeRequest(app, '/test', { requestId: 'fields-test' });
+    const { logEntry } = await captureRequestIdLoggerRecord({ requestId: 'fields-test' });
 
-    await new Promise((r) => setTimeout(r, 50));
-
-    expect(logs.length).toBeGreaterThanOrEqual(1);
-    const logEntry = JSON.parse(logs[logs.length - 1]);
+    expect(logEntry).toBeDefined();
     expect(logEntry.method).toBe('GET');
     expect(logEntry.path).toBe('/test');
     expect(logEntry.requestId).toBe('fields-test');
@@ -392,19 +387,6 @@ describe('Request ID Middleware — log enrichment', () => {
 // ---------------------------------------------------------------------------
 
 describe('Request ID Middleware — error responses', () => {
-  let logs;
-  let originalLog;
-
-  beforeEach(() => {
-    logs = [];
-    originalLog = console.log;
-    console.log = (...args) => logs.push(args.join(' '));
-  });
-
-  afterEach(() => {
-    console.log = originalLog;
-  });
-
   test('400 error response includes X-Request-ID header', async () => {
     const app = buildAppWithErrors();
     const res = await makeRequest(app, '/error-400', { requestId: 'err-400-id' });

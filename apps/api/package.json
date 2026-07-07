@@ -13,23 +13,25 @@
     "db:migrate": "bunx prisma migrate dev",
     "db:migrate:deploy": "bunx prisma migrate deploy",
     "db:seed": "bunx prisma db seed",
-    "db:reset": "bunx prisma migrate reset --force",
+    "db:reset": "bunx prisma migrate reset --force && bunx prisma db seed",
     "db:studio": "bunx prisma studio",
     "generate": "bunx prisma generate"
   },
-  "prisma": {
-    "seed": "bun prisma/seed.js"
-  },
   "devDependencies": {
-    "prisma": "^6"
+    "dotenv": "^17.4.2",
+    "pino-pretty": "^13.1.3",
+    "prisma": "^7"
   },
   "dependencies": {
+    "@elysia/opentelemetry": "^1.4.12",
     "@elysiajs/cors": "^1.4.2",
     "@elysiajs/swagger": "^1.3.1",
     "@mycelium/shared": "workspace:*",
-    "@prisma/client": "^6",
+    "@prisma/adapter-pg": "^7.8.0",
+    "@prisma/client": "^7",
     "bcryptjs": "^3.0.3",
     "elysia": "^1.4.28",
-    "jsonwebtoken": "^9.0.3"
+    "jsonwebtoken": "^9.0.3",
+    "pino": "^10.3.1"
   }
 }

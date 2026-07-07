@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { config } from 'dotenv';
 import { defineConfig } from 'prisma/config';
 
-config({ path: resolve(dirname(fileURLToPath(import.meta.url)), '../../.env') });
+config({ path: resolve(dirname(fileURLToPath(import.meta.url)), '../../.env'), quiet: true });
 
 export default defineConfig({
   schema: 'prisma/schema.prisma',

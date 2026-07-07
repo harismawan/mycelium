@@ -23,6 +23,9 @@ mock.module('@prisma/client', () => ({
   },
 }));
 
+const mockEmbedText = mock(async () => null);
+mock.module('../../src/services/embedding.service.js', () => ({ embedText: mockEmbedText }));
+
 // ---------------------------------------------------------------------------
 // Import service AFTER all mocks are registered
 // ---------------------------------------------------------------------------
@@ -34,6 +37,8 @@ beforeEach(() => {
   mockNote.findMany.mockReset();
   mockNote.findFirst.mockReset();
   mockQueryRaw.mockReset();
+  mockEmbedText.mockReset();
+  mockEmbedText.mockResolvedValue(null);
 });
 
 // ===========================================================================
@@ -58,6 +63,71 @@ describe('SearchService lexical operators', () => {
     const sql = JSON.stringify(mockQueryRaw.mock.calls[0]);
     expect(sql).toContain('websearch_to_tsquery');
     expect(sql).not.toContain('plainto_tsquery');
+  });
+});
+
+// ===========================================================================
+// Tier 2 — OR relaxation
+// ===========================================================================
+describe('SearchService OR relaxation (search)', () => {
+  test('relaxes to an OR-joined query when strict returns zero rows (first page)', async () => {
+    mockQueryRaw
+      .mockResolvedValueOnce([]) // tier 1 strict: miss
+      .mockResolvedValueOnce([
+        {
+          id: 'n1',
+          slug: 'api-deploy',
+          title: 'API deployment',
+          excerpt: 'localhost mycelium',
+          status: 'PUBLISHED',
+          updatedAt: new Date('2026-05-05T00:00:00.000Z'),
+          rank: 0.3,
+        },
+      ]);
+
+    const out = await SearchService.search(userId, 'api localhost mycelium deployment');
+
+    // Two lexical passes ran: strict then OR.
+    expect(mockQueryRaw).toHaveBeenCalledTimes(2);
+    // The second pass bound an OR-joined query string.
+    const orSql = JSON.stringify(mockQueryRaw.mock.calls[1]);
+    expect(orSql).toContain('api OR localhost OR mycelium OR deployment');
+    // Relaxed tier is single-page.
+    expect(out.notes).toHaveLength(1);
+    expect(out.notes[0].slug).toBe('api-deploy');
+    expect(out.nextCursor).toBeNull();
+  });
+
+  test('does not relax when strict returns rows', async () => {
+    mockQueryRaw.mockResolvedValueOnce([
+      {
+        id: 'n1',
+        slug: 'exact',
+        title: 'Exact',
+        excerpt: 'e',
+        status: 'PUBLISHED',
+        updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+        rank: 0.9,
+      },
+    ]);
+
+    const out = await SearchService.search(userId, 'exact match here');
+
+    expect(mockQueryRaw).toHaveBeenCalledTimes(1); // strict only, no OR pass
+    expect(out.notes).toHaveLength(1);
+  });
+
+  test('does not relax on a cursor page even when strict is empty', async () => {
+    mockQueryRaw.mockResolvedValueOnce([]); // strict miss, but cursor supplied
+
+    const cursor = Buffer.from(
+      JSON.stringify({ rank: 0.5, updatedAt: '2026-01-01T00:00:00.000Z', id: 'n9' }),
+    ).toString('base64url');
+    const out = await SearchService.search(userId, 'api localhost mycelium', { cursor });
+
+    expect(mockQueryRaw).toHaveBeenCalledTimes(1); // no OR pass on cursor pages
+    expect(out.notes).toHaveLength(0);
+    expect(out.nextCursor).toBeNull();
   });
 });
 

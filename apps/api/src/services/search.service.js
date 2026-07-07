@@ -224,7 +224,20 @@ export const SearchService = {
         };
       };
 
-      return runLexical(tsQuery);
+      const strictOut = await runLexical(tsQuery);
+      // Strict hit, or a cursor page (cursors are only ever minted by the strict
+      // tier) → stay strict. Relaxation only fires on an empty first page.
+      if (strictOut.notes.length > 0 || filters.cursor) return strictOut;
+
+      // Tier 2: OR-relax. Single-page rescue (nextCursor null) so a later page
+      // can never mix the OR ts_rank scale with the strict keyset.
+      const orText = buildOrQuery(query);
+      if (orText) {
+        const orOut = await runLexical(Prisma.sql`websearch_to_tsquery('english', ${orText})`);
+        if (orOut.notes.length > 0) return { notes: orOut.notes, nextCursor: null };
+      }
+
+      return strictOut; // still empty — Task 4 adds the Tier 3 trigram fallback here
     }
 
     // ---- fused RRF path -------------------------------------------------------

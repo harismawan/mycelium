@@ -237,7 +237,28 @@ export const SearchService = {
         if (orOut.notes.length > 0) return { notes: orOut.notes, nextCursor: null };
       }
 
-      return strictOut; // still empty — Task 4 adds the Tier 3 trigram fallback here
+      // Tier 3: pg_trgm fuzzy fallback on title (typo / paraphrase). Single page.
+      const statusCondition = filters.status
+        ? Prisma.sql`n."status" = ${filters.status}::"NoteStatus"`
+        : Prisma.sql`n."status" != 'ARCHIVED'`;
+      let trgJoin = Prisma.empty;
+      if (filters.tag) {
+        trgJoin = Prisma.sql`
+          INNER JOIN "_NoteToTag" nt ON nt."A" = n."id"
+          INNER JOIN "Tag" t ON t."id" = nt."B" AND t."name" = ${filters.tag}`;
+      }
+      const fuzzy = await prisma.$queryRaw`
+        SELECT n."id", n."slug", n."title", n."excerpt", n."status",
+               similarity(n."title", ${query}) AS rank
+        FROM "Note" n
+        ${trgJoin}
+        WHERE n."userId" = ${userId}
+          AND ${statusCondition}
+          AND similarity(n."title", ${query}) > ${TRIGRAM_SIMILARITY_THRESHOLD}
+        ORDER BY rank DESC, n."updatedAt" DESC, n."id" DESC
+        LIMIT ${limit}
+      `;
+      return { notes: fuzzy, nextCursor: null };
     }
 
     // ---- fused RRF path -------------------------------------------------------

@@ -131,6 +131,35 @@ describe('SearchService OR relaxation (search)', () => {
   });
 });
 
+describe('SearchService trigram fallback (search)', () => {
+  test('falls back to title similarity when strict and OR both miss', async () => {
+    mockQueryRaw
+      .mockResolvedValueOnce([]) // tier 1 strict miss
+      .mockResolvedValueOnce([]) // tier 2 OR miss
+      .mockResolvedValueOnce([
+        // tier 3 trigram hit
+        {
+          id: 'n1',
+          slug: 'deploymnt',
+          title: 'Deploymnt notes',
+          excerpt: 'typo title',
+          status: 'PUBLISHED',
+          updatedAt: new Date('2026-06-06T00:00:00.000Z'),
+          rank: 0.42,
+        },
+      ]);
+
+    const out = await SearchService.search(userId, 'deployment mycelium');
+
+    expect(mockQueryRaw).toHaveBeenCalledTimes(3);
+    const trgSql = JSON.stringify(mockQueryRaw.mock.calls[2]);
+    expect(trgSql).toContain('similarity');
+    expect(out.notes).toHaveLength(1);
+    expect(out.notes[0].slug).toBe('deploymnt');
+    expect(out.nextCursor).toBeNull();
+  });
+});
+
 // ===========================================================================
 // getContext — exposed score + ts_headline snippet
 // ===========================================================================

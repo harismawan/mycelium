@@ -84,20 +84,31 @@ describe('SearchService.search', () => {
 
   /** Validates: Requirements 6.3 */
   test('applies status filter', async () => {
-    mockQueryRaw.mockResolvedValue([]);
+    // Non-empty strict result so the Tier-3 trigram fallback does not fire.
+    mockQueryRaw.mockResolvedValue([
+      { id: 'n1', slug: 'a', title: 'A', excerpt: null, status: 'PUBLISHED', rank: 0.5 },
+    ]);
 
     await SearchService.search(userId, 'hello', { status: 'PUBLISHED' });
 
     expect(mockQueryRaw).toHaveBeenCalledTimes(1);
+    const sql = JSON.stringify(mockQueryRaw.mock.calls[0]);
+    expect(sql).toContain('PUBLISHED');
   });
 
   /** Validates: Requirements 6.3 */
   test('applies tag filter', async () => {
-    mockQueryRaw.mockResolvedValue([]);
+    // Non-empty strict result so the Tier-3 trigram fallback does not fire.
+    mockQueryRaw.mockResolvedValue([
+      { id: 'n1', slug: 'a', title: 'A', excerpt: null, status: 'DRAFT', rank: 0.5 },
+    ]);
 
     await SearchService.search(userId, 'hello', { tag: 'javascript' });
 
     expect(mockQueryRaw).toHaveBeenCalledTimes(1);
+    const sql = JSON.stringify(mockQueryRaw.mock.calls[0]);
+    expect(sql).toContain('javascript');
+    expect(sql).toContain('_NoteToTag');
   });
 
   /** Validates: Requirements 6.4 + R4 (3-key cursor) */

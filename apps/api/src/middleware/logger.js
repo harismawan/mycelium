@@ -1,5 +1,7 @@
 import { logger } from '../utils/logger.js';
 
+const perRequest = new WeakMap();
+
 /**
  * Structured JSON access log (pino). Field keys are byte-identical to receh so
  * existing Elasticsearch mappings apply unchanged. Redaction runs through
@@ -15,48 +17,56 @@ import { logger } from '../utils/logger.js';
 export function applyLogger(app) {
   const logBody = process.env.LOG_BODY === 'true';
   return app
-    .onRequest(({ request, store }) => {
-      store.__startedAt = Date.now();
-      store.__path = (() => {
-        try {
-          return new URL(request.url).pathname;
-        } catch {
-          return request.url;
-        }
-      })();
-      store.__method = request.method;
-      store.__requestBody = undefined;
-      store.__responseBody = undefined;
-      store.__client = (request.headers.get('x-mycelium-client') || 'web')
-        .toLowerCase()
-        .slice(0, 32);
-      store.__appVersion = (request.headers.get('app-version') || '').slice(0, 32) || null;
+    .onRequest(({ request }) => {
+      perRequest.set(request, {
+        startedAt: Date.now(),
+        path: (() => {
+          try {
+            return new URL(request.url).pathname;
+          } catch {
+            return request.url;
+          }
+        })(),
+        method: request.method,
+        requestBody: undefined,
+        responseBody: undefined,
+        client: (request.headers.get('x-mycelium-client') || 'web').toLowerCase().slice(0, 32),
+        appVersion: (request.headers.get('app-version') || '').slice(0, 32) || null,
+      });
     })
     // Empty hook so @elysia/opentelemetry emits a Parse span.
     .onParse(() => {})
-    .onTransform(({ body, store }) => {
-      store.__requestBody = body;
+    .onTransform(({ body, request }) => {
+      const state = perRequest.get(request);
+      if (state) {
+        state.requestBody = body;
+      }
     })
-    .onAfterHandle(({ response, store }) => {
-      store.__responseBody = response;
+    .onAfterHandle(({ response, request }) => {
+      const state = perRequest.get(request);
+      if (state) {
+        state.responseBody = response;
+      }
     })
     // Empty hook so @elysia/opentelemetry emits a MapResponse span.
     .mapResponse(() => {})
     .onAfterResponse((ctx) => {
-      const { store, set, requestId } = ctx;
-      const responseTime = Date.now() - (store.__startedAt ?? Date.now());
+      const { set, request, requestId } = ctx;
+      const state = perRequest.get(request) ?? {};
+      const responseTime = Date.now() - (state.startedAt ?? Date.now());
+      perRequest.delete(request);
       logger.info(
         {
           requestId,
-          method: store.__method,
-          path: store.__path,
+          method: state.method,
+          path: state.path,
           status: set.status ?? 200,
           responseTime,
-          client: store.__client ?? 'web',
-          appVersion: store.__appVersion ?? null,
+          client: state.client ?? 'web',
+          appVersion: state.appVersion ?? null,
           userId: ctx.user?.id ?? null,
-          requestBody: logBody ? store.__requestBody : undefined,
-          responseBody: logBody ? store.__responseBody : undefined,
+          requestBody: logBody ? state.requestBody : undefined,
+          responseBody: logBody ? state.responseBody : undefined,
         },
         'http',
       );

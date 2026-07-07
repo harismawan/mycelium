@@ -104,6 +104,28 @@ describe('SearchService OR relaxation (search)', () => {
     expect(out.nextCursor).toBeNull();
   });
 
+  test('strips quotes so a quoted long query still relaxes to OR', async () => {
+    mockQueryRaw.mockResolvedValueOnce([]).mockResolvedValueOnce([
+      {
+        id: 'n1',
+        slug: 'api-deploy',
+        title: 'API deployment',
+        excerpt: 'x',
+        status: 'PUBLISHED',
+        updatedAt: new Date('2026-05-05T00:00:00.000Z'),
+        rank: 0.3,
+      },
+    ]);
+
+    const out = await SearchService.search(userId, '"api localhost mycelium deployment"');
+
+    const orSql = JSON.stringify(mockQueryRaw.mock.calls[1]);
+    expect(orSql).toContain('api OR localhost OR mycelium OR deployment');
+    expect(orSql).not.toContain('\\"api');
+    expect(orSql).not.toContain('deployment\\"');
+    expect(out.notes).toHaveLength(1);
+  });
+
   test('does not relax when strict returns rows', async () => {
     mockQueryRaw.mockResolvedValueOnce([
       {
@@ -163,6 +185,54 @@ describe('SearchService trigram fallback (search)', () => {
     expect(out.notes).toHaveLength(1);
     expect(out.notes[0].slug).toBe('deploymnt');
     expect(out.nextCursor).toBeNull();
+  });
+
+  test('trigram fallback carries a status filter', async () => {
+    mockQueryRaw
+      .mockResolvedValueOnce([]) // strict miss
+      .mockResolvedValueOnce([]) // OR miss
+      .mockResolvedValueOnce([
+        {
+          id: 'n1',
+          slug: 'deploymnt',
+          title: 'Deploymnt',
+          excerpt: 'x',
+          status: 'PUBLISHED',
+          updatedAt: new Date('2026-06-06T00:00:00.000Z'),
+          rank: 0.42,
+        },
+      ]);
+
+    const out = await SearchService.search(userId, 'deployment mycelium', { status: 'PUBLISHED' });
+
+    const trgSql = JSON.stringify(mockQueryRaw.mock.calls[2]);
+    expect(trgSql).toContain('similarity');
+    expect(trgSql).toContain('PUBLISHED');
+    expect(out.notes).toHaveLength(1);
+    expect(out.nextCursor).toBeNull();
+  });
+
+  test('single-token query with empty strict skips OR and hits trigram', async () => {
+    mockQueryRaw
+      .mockResolvedValueOnce([]) // strict miss
+      .mockResolvedValueOnce([
+        {
+          id: 'n1',
+          slug: 'xyzzy',
+          title: 'Xyzzy',
+          excerpt: 'x',
+          status: 'DRAFT',
+          updatedAt: new Date('2026-06-06T00:00:00.000Z'),
+          rank: 0.4,
+        },
+      ]);
+
+    const out = await SearchService.search(userId, 'xyzzy');
+
+    expect(mockQueryRaw).toHaveBeenCalledTimes(2); // strict + trigram, no OR
+    const trgSql = JSON.stringify(mockQueryRaw.mock.calls[1]);
+    expect(trgSql).toContain('similarity');
+    expect(out.notes[0].slug).toBe('xyzzy');
   });
 });
 

@@ -49,6 +49,7 @@ function buildOrQuery(query) {
   const tokens = String(query ?? '')
     .trim()
     .split(/\s+/)
+    .map((t) => t.replace(/^["'(\[]+|["')\]]+$/g, ''))
     .filter((t) => t.length > 0 && !TSQUERY_OPERATOR_TOKENS.has(t));
   if (tokens.length < 2) return null;
   return tokens.join(' OR ');

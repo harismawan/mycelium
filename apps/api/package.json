@@ -17,10 +17,8 @@
     "db:studio": "bunx prisma studio",
     "generate": "bunx prisma generate"
   },
-  "prisma": {
-    "seed": "bun prisma/seed.js"
-  },
   "devDependencies": {
+    "dotenv": "^17.4.2",
     "prisma": "^7"
   },
   "dependencies": {

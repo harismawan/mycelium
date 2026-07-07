@@ -1,9 +1,9 @@
 // @ts-check
-import { PrismaClient } from '@prisma/client';
-import bcrypt from 'bcryptjs';
 import { createHash } from 'crypto';
 
-const prisma = new PrismaClient();
+import bcrypt from 'bcryptjs';
+
+import { prisma } from '../src/db.js';
 
 /** @param {string} key */
 function hashApiKey(key) {

@@ -7,4 +7,4 @@ resources:
 
 images:
   - name: ghcr.io/harismawan/mycelium-mcp
-    newTag: 0.4.2
+    newTag: 0.4.3

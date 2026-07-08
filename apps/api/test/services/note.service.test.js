@@ -28,6 +28,7 @@ const mockRevision = {
 const mockQueryRaw = mock(() => []);
 const mockSearchService = {
   search: mock(() => ({ notes: [], nextCursor: null })),
+  _tieredMatch: mock(() => ({ rows: [], nextCursor: null })),
 };
 
 /** Tracks the callback/array passed to $transaction so we can inspect calls */
@@ -55,6 +56,11 @@ mock.module('@prisma/client', () => ({
       this.$transaction = mockTransaction;
       this.$queryRaw = mockQueryRaw;
     }
+  },
+  Prisma: {
+    sql: (strings, ...values) => ({ strings, values, type: 'sql' }),
+    join: (items, sep) => ({ items, sep, type: 'join' }),
+    empty: { type: 'empty' },
   },
 }));
 
@@ -107,7 +113,9 @@ beforeEach(() => {
   mockRevision.create.mockReset();
   mockQueryRaw.mockReset();
   mockSearchService.search.mockReset();
+  mockSearchService._tieredMatch.mockReset?.();
   mockSearchService.search.mockResolvedValue({ notes: [], nextCursor: null });
+  mockSearchService._tieredMatch.mockResolvedValue({ rows: [], nextCursor: null });
   mockTransaction.mockReset();
 
   // Restore default $transaction implementation
@@ -427,14 +435,61 @@ describe('NoteService.listNotes', () => {
     expect(findCall.where.tags).toEqual({ some: { name: 'javascript' } });
   });
 
-  test('applies search query filter', async () => {
-    mockNote.findMany.mockResolvedValue([]);
+  test('q delegates to SearchService._tieredMatch (no substring where.OR)', async () => {
+    mockSearchService._tieredMatch.mockResolvedValueOnce({
+      rows: [{ id: 'n2', rank: 0.5 }, { id: 'n1', rank: 0.9 }],
+      nextCursor: null,
+    });
+    // findMany returns them in a DIFFERENT order than the ranked ids
+    mockNote.findMany.mockResolvedValueOnce([
+      { id: 'n1', slug: 'a', title: 'A', tags: [], directory: null },
+      { id: 'n2', slug: 'b', title: 'B', tags: [], directory: null },
+    ]);
 
-    await NoteService.listNotes(userId, { q: 'hello' });
+    const result = await NoteService.listNotes(userId, { q: 'hello world' });
 
-    const findCall = mockNote.findMany.mock.calls[0][0];
-    expect(findCall.where.OR).toBeDefined();
-    expect(findCall.where.OR).toHaveLength(2);
+    // delegated with the query
+    expect(mockSearchService._tieredMatch).toHaveBeenCalledTimes(1);
+    expect(mockSearchService._tieredMatch.mock.calls[0][1]).toBe('hello world');
+    // hydrated by id, reordered to the ranked-id sequence [n2, n1]
+    const findWhere = mockNote.findMany.mock.calls[0][0].where;
+    expect(findWhere.id).toEqual({ in: ['n2', 'n1'] });
+    expect(result.notes.map((n) => n.id)).toEqual(['n2', 'n1']);
+    // no legacy substring filter
+    expect(findWhere.OR).toBeUndefined();
+  });
+
+  test('q with empty match returns empty without hydrating', async () => {
+    mockSearchService._tieredMatch.mockResolvedValueOnce({ rows: [], nextCursor: null });
+    mockNote.findMany.mockReset();
+
+    const result = await NoteService.listNotes(userId, { q: 'zzz nomatch' });
+
+    expect(result).toEqual({ notes: [], nextCursor: null });
+    expect(mockNote.findMany).not.toHaveBeenCalled();
+  });
+
+  test('q composes with tag + directory filters (passed as conditions)', async () => {
+    mockSearchService._tieredMatch.mockResolvedValueOnce({ rows: [], nextCursor: null });
+
+    await NoteService.listNotes(userId, { q: 'api mycelium', tag: 'ops', directoryId: 'dir_42' });
+
+    const [, , opts] = mockSearchService._tieredMatch.mock.calls[0];
+    const condSql = JSON.stringify(opts.conditions);
+    expect(condSql).toContain('ops');
+    expect(condSql).toContain('dir_42');
+  });
+
+  test('q defaults to excluding ARCHIVED, and honors an explicit status', async () => {
+    mockSearchService._tieredMatch.mockResolvedValue({ rows: [], nextCursor: null });
+
+    await NoteService.listNotes(userId, { q: 'api mycelium' });
+    let conds = JSON.stringify(mockSearchService._tieredMatch.mock.calls.at(-1)[2].conditions);
+    expect(conds).toContain('ARCHIVED'); // default excludes archived
+
+    await NoteService.listNotes(userId, { q: 'api mycelium', status: 'PUBLISHED' });
+    conds = JSON.stringify(mockSearchService._tieredMatch.mock.calls.at(-1)[2].conditions);
+    expect(conds).toContain('PUBLISHED');
   });
 
   test('passes cursor for pagination', async () => {

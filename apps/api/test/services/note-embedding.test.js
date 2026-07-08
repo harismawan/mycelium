@@ -26,6 +26,11 @@ mock.module('@prisma/client', () => ({
       this.$executeRaw = mockExecuteRaw;
     }
   },
+  Prisma: {
+    sql: (strings, ...values) => ({ strings, values, type: 'sql' }),
+    join: (items, sep) => ({ items, sep, type: 'join' }),
+    empty: { type: 'empty' },
+  },
 }));
 
 const mockEmbedText = mock(async () => null);

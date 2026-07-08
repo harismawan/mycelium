@@ -417,3 +417,78 @@ describe('SearchService.getContext expand OR relaxation', () => {
     expect(out[0].slug).toBe('api-deploy');
   });
 });
+
+// ===========================================================================
+// _tieredMatch — shared tier helper (ranked ids under arbitrary conditions)
+// ===========================================================================
+describe('SearchService._tieredMatch', () => {
+  test('strict hit returns ids + cursor, no relaxation', async () => {
+    mockQueryRaw.mockResolvedValueOnce([
+      { id: 'n1', updatedAt: new Date('2026-05-05T00:00:00.000Z'), rank: 0.9 },
+    ]);
+
+    const out = await SearchService._tieredMatch(userId, 'exact term', { limit: 20 });
+
+    expect(mockQueryRaw).toHaveBeenCalledTimes(1);
+    expect(out.rows).toEqual([{ id: 'n1', rank: 0.9 }]);
+  });
+
+  test('OR-relax on empty strict first page', async () => {
+    mockQueryRaw
+      .mockResolvedValueOnce([]) // strict miss
+      .mockResolvedValueOnce([   // OR hit
+        { id: 'n2', updatedAt: new Date('2026-05-05T00:00:00.000Z'), rank: 0.3 },
+      ]);
+
+    const out = await SearchService._tieredMatch(userId, 'api localhost mycelium deployment', { limit: 20 });
+
+    expect(mockQueryRaw).toHaveBeenCalledTimes(2);
+    const orSql = JSON.stringify(mockQueryRaw.mock.calls[1]);
+    expect(orSql).toContain('api OR localhost OR mycelium OR deployment');
+    expect(out.rows).toEqual([{ id: 'n2', rank: 0.3 }]);
+    expect(out.nextCursor).toBeNull();
+  });
+
+  test('trigram tier on strict+OR double miss', async () => {
+    mockQueryRaw
+      .mockResolvedValueOnce([]) // strict
+      .mockResolvedValueOnce([]) // OR
+      .mockResolvedValueOnce([{ id: 'n3', rank: 0.42 }]); // trigram
+
+    const out = await SearchService._tieredMatch(userId, 'mycellium deploymnt', { limit: 20 });
+
+    expect(mockQueryRaw).toHaveBeenCalledTimes(3);
+    const trgSql = JSON.stringify(mockQueryRaw.mock.calls[2]);
+    expect(trgSql).toContain('similarity');
+    expect(out.rows).toEqual([{ id: 'n3', rank: 0.42 }]);
+    expect(out.nextCursor).toBeNull();
+  });
+
+  test('cursor page does not relax', async () => {
+    mockQueryRaw.mockResolvedValueOnce([]); // strict miss, cursor present
+    const cursor = Buffer.from(
+      JSON.stringify({ rank: 0.5, updatedAt: '2026-01-01T00:00:00.000Z', id: 'n9' }),
+    ).toString('base64url');
+
+    const out = await SearchService._tieredMatch(userId, 'api localhost', { limit: 20, cursor });
+
+    expect(mockQueryRaw).toHaveBeenCalledTimes(1);
+    expect(out.rows).toEqual([]);
+  });
+
+  test('threads conditions into every tier WHERE', async () => {
+    mockQueryRaw
+      .mockResolvedValueOnce([]) // strict
+      .mockResolvedValueOnce([]) // OR
+      .mockResolvedValueOnce([]); // trigram
+
+    await SearchService._tieredMatch(userId, 'api localhost mycelium', {
+      limit: 20,
+      conditions: [{ strings: [`n."directoryId" = `, ``], values: ['dir_42'], type: 'sql' }],
+    });
+
+    const all = JSON.stringify(mockQueryRaw.mock.calls);
+    // the bound condition value appears in strict, OR, and trigram SQL
+    expect((all.match(/dir_42/g) || []).length).toBeGreaterThanOrEqual(3);
+  });
+});

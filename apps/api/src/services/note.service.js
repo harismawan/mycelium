@@ -321,30 +321,6 @@ export const NoteService = {
   async listNotes(userId, opts = {}) {
     const limit = opts.limit ?? DEFAULT_PAGE_LIMIT;
 
-    /** @type {Record<string, unknown>} */
-    const where = { userId };
-
-    if (opts.status) {
-      where.status = opts.status;
-    } else {
-      // Exclude archived by default
-      where.status = { not: 'ARCHIVED' };
-    }
-
-    if (opts.tag) {
-      where.tags = { some: { name: opts.tag } };
-    }
-
-    if (opts.unfiled === true) {
-      where.directoryId = null;
-    } else if (opts.directoryId) {
-      where.directoryId = opts.directoryId;
-    }
-
-    if (opts.pinned === true) {
-      where.pinned = true;
-    }
-
     // Full-text q: delegate ranking to the shared 3-tier relaxation helper, then
     // hydrate the full list shape. Ordering is by relevance (rank), not pinned.
     if (opts.q) {
@@ -383,6 +359,30 @@ export const NoteService = {
       const byId = new Map(found.map((n) => [n.id, n]));
       const notes = ids.map((id) => byId.get(id)).filter(Boolean);
       return { notes, nextCursor };
+    }
+
+    /** @type {Record<string, unknown>} */
+    const where = { userId };
+
+    if (opts.status) {
+      where.status = opts.status;
+    } else {
+      // Exclude archived by default
+      where.status = { not: 'ARCHIVED' };
+    }
+
+    if (opts.tag) {
+      where.tags = { some: { name: opts.tag } };
+    }
+
+    if (opts.unfiled === true) {
+      where.directoryId = null;
+    } else if (opts.directoryId) {
+      where.directoryId = opts.directoryId;
+    }
+
+    if (opts.pinned === true) {
+      where.pinned = true;
     }
 
     const notes = await prisma.note.findMany({

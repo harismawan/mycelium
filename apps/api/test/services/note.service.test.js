@@ -480,6 +480,18 @@ describe('NoteService.listNotes', () => {
     expect(condSql).toContain('dir_42');
   });
 
+  test('q defaults to excluding ARCHIVED, and honors an explicit status', async () => {
+    mockSearchService._tieredMatch.mockResolvedValue({ rows: [], nextCursor: null });
+
+    await NoteService.listNotes(userId, { q: 'api mycelium' });
+    let conds = JSON.stringify(mockSearchService._tieredMatch.mock.calls.at(-1)[2].conditions);
+    expect(conds).toContain('ARCHIVED'); // default excludes archived
+
+    await NoteService.listNotes(userId, { q: 'api mycelium', status: 'PUBLISHED' });
+    conds = JSON.stringify(mockSearchService._tieredMatch.mock.calls.at(-1)[2].conditions);
+    expect(conds).toContain('PUBLISHED');
+  });
+
   test('passes cursor for pagination', async () => {
     mockNote.findMany.mockResolvedValue([]);
 

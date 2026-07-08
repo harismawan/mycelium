@@ -8,6 +8,7 @@ import {
   FORGET_STALE_DEFAULT_DAYS,
   FORGET_MIN_IMPORTANCE,
 } from '@mycelium/shared';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../db.js';
 import { LinkService } from './link.service.js';
 import { embedText } from './embedding.service.js';
@@ -340,15 +341,48 @@ export const NoteService = {
       where.directoryId = opts.directoryId;
     }
 
-    if (opts.q) {
-      where.OR = [
-        { title: { contains: opts.q, mode: 'insensitive' } },
-        { content: { contains: opts.q, mode: 'insensitive' } },
-      ];
-    }
-
     if (opts.pinned === true) {
       where.pinned = true;
+    }
+
+    // Full-text q: delegate ranking to the shared 3-tier relaxation helper, then
+    // hydrate the full list shape. Ordering is by relevance (rank), not pinned.
+    if (opts.q) {
+      const conditions = [];
+      if (opts.status) {
+        conditions.push(Prisma.sql`n."status" = ${opts.status}::"NoteStatus"`);
+      } else {
+        conditions.push(Prisma.sql`n."status" != 'ARCHIVED'`);
+      }
+      if (opts.tag) {
+        conditions.push(
+          Prisma.sql`EXISTS (SELECT 1 FROM "_NoteToTag" nt JOIN "Tag" t ON t."id" = nt."B" WHERE nt."A" = n."id" AND t."name" = ${opts.tag})`,
+        );
+      }
+      if (opts.unfiled === true) {
+        conditions.push(Prisma.sql`n."directoryId" IS NULL`);
+      } else if (opts.directoryId) {
+        conditions.push(Prisma.sql`n."directoryId" = ${opts.directoryId}`);
+      }
+      if (opts.pinned === true) {
+        conditions.push(Prisma.sql`n."pinned" = true`);
+      }
+
+      const { rows, nextCursor } = await SearchService._tieredMatch(userId, opts.q, {
+        conditions,
+        limit,
+        cursor: opts.cursor,
+      });
+      if (rows.length === 0) return { notes: [], nextCursor: null };
+
+      const ids = rows.map((r) => r.id);
+      const found = await prisma.note.findMany({
+        where: { userId, id: { in: ids } },
+        include: { tags: true, directory: { select: { id: true, name: true, parentId: true } } },
+      });
+      const byId = new Map(found.map((n) => [n.id, n]));
+      const notes = ids.map((id) => byId.get(id)).filter(Boolean);
+      return { notes, nextCursor };
     }
 
     const notes = await prisma.note.findMany({

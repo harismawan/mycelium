@@ -324,6 +324,91 @@ export const SearchService = {
   },
 
   /**
+   * Ranked-id core of the 3-tier lexical relaxation, decoupled from result
+   * shape so multiple callers (search, listNotes q) can reuse it.
+   *
+   * Tiers: strict `websearch_to_tsquery` (paginated) → OR-relax on an empty
+   * strict first page (single page) → pg_trgm title fallback (single page).
+   * `conditions` are `Prisma.sql` fragments over the `"Note" n` alias, ANDed
+   * into every tier's WHERE; the helper adds `userId` and the match predicate.
+   *
+   * @param {string} userId
+   * @param {string} query
+   * @param {{ conditions?: import('@prisma/client').Prisma.Sql[], limit?: number, cursor?: string }} [opts={}]
+   * @returns {Promise<{ rows: Array<{ id: string, rank: number }>, nextCursor: string | null }>}
+   * @private
+   */
+  async _tieredMatch(userId, query, opts = {}) {
+    const limit = opts.limit ?? DEFAULT_PAGE_LIMIT;
+    const conditions = opts.conditions ?? [];
+
+    const runMatch = async (tsQuery) => {
+      const rankSql = Prisma.sql`ts_rank(n."searchVector", ${tsQuery})`;
+      const conds = [
+        Prisma.sql`n."userId" = ${userId}`,
+        Prisma.sql`n."searchVector" @@ ${tsQuery}`,
+        ...conditions,
+      ];
+
+      if (opts.cursor) {
+        const cursor = decodeCursor(opts.cursor);
+        if (cursor.rank === null) {
+          conds.push(Prisma.sql`n."id" < ${cursor.id}`);
+        } else if (cursor.updatedAt === null) {
+          conds.push(
+            Prisma.sql`(${rankSql} < ${cursor.rank} OR (${rankSql} = ${cursor.rank} AND n."id" < ${cursor.id}))`,
+          );
+        } else {
+          const cursorUpdatedAt = new Date(cursor.updatedAt);
+          conds.push(
+            Prisma.sql`(
+              ${rankSql} < ${cursor.rank}
+              OR (${rankSql} = ${cursor.rank} AND n."updatedAt" < ${cursorUpdatedAt})
+              OR (${rankSql} = ${cursor.rank} AND n."updatedAt" = ${cursorUpdatedAt} AND n."id" < ${cursor.id})
+            )`,
+          );
+        }
+      }
+
+      const results = await prisma.$queryRaw`
+        SELECT n."id", n."updatedAt", ${rankSql} AS rank
+        FROM "Note" n
+        WHERE ${Prisma.join(conds, ' AND ')}
+        ORDER BY rank DESC, n."updatedAt" DESC, n."id" DESC
+        LIMIT ${limit + 1}
+      `;
+
+      const hasMore = results.length > limit;
+      if (hasMore) results.pop();
+      const nextCursor = hasMore ? encodeCursor(results[results.length - 1]) : null;
+      return { rows: results.map((r) => ({ id: r.id, rank: Number(r.rank) })), nextCursor };
+    };
+
+    const strict = await runMatch(Prisma.sql`websearch_to_tsquery('english', ${query})`);
+    if (strict.rows.length > 0 || opts.cursor) return strict;
+
+    const orText = buildOrQuery(query);
+    if (orText) {
+      const or = await runMatch(Prisma.sql`websearch_to_tsquery('english', ${orText})`);
+      if (or.rows.length > 0) return { rows: or.rows, nextCursor: null };
+    }
+
+    const trgConds = [
+      Prisma.sql`n."userId" = ${userId}`,
+      Prisma.sql`similarity(n."title", ${query}) > ${TRIGRAM_SIMILARITY_THRESHOLD}`,
+      ...conditions,
+    ];
+    const fuzzy = await prisma.$queryRaw`
+      SELECT n."id", similarity(n."title", ${query}) AS rank
+      FROM "Note" n
+      WHERE ${Prisma.join(trgConds, ' AND ')}
+      ORDER BY rank DESC, n."updatedAt" DESC, n."id" DESC
+      LIMIT ${limit}
+    `;
+    return { rows: fuzzy.map((r) => ({ id: r.id, rank: Number(r.rank) })), nextCursor: null };
+  },
+
+  /**
    * Return notes useful for session-start context loading.
    *
    * With a topic, this uses the same full-text search ranking as `search`.

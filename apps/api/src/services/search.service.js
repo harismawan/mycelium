@@ -28,6 +28,33 @@ function clampExpandDepth(depth) {
   return Math.min(Math.max(d, 1), MAX_EXPAND_DEPTH);
 }
 
+/** tsquery operator tokens that must never survive into a rebuilt OR query. */
+const TSQUERY_OPERATOR_TOKENS = new Set(['OR', 'AND', 'NOT', '-', '|', '&', '!', '<->']);
+
+/**
+ * Rebuild a natural-language query as an OR-of-terms string for a wider,
+ * recall-first pass. The result is passed as a bound parameter to
+ * `websearch_to_tsquery`, which treats a literal `OR` between words as
+ * disjunction — so `"api localhost mycelium"` becomes `"api OR localhost OR
+ * mycelium"` and matches notes containing *any* term (ranked by ts_rank).
+ *
+ * Operator-only tokens are dropped so a user-supplied `OR`/`-`/`|` cannot
+ * inject stray tsquery syntax. Returns `null` when fewer than 2 usable tokens
+ * remain (the OR variant would be identical to the strict query).
+ *
+ * @param {string} query
+ * @returns {string | null}
+ */
+function buildOrQuery(query) {
+  const tokens = String(query ?? '')
+    .trim()
+    .split(/\s+/)
+    .map((t) => t.replace(/^["'(\[]+|["')\]]+$/g, ''))
+    .filter((t) => t.length > 0 && !TSQUERY_OPERATOR_TOKENS.has(t));
+  if (tokens.length < 2) return null;
+  return tokens.join(' OR ');
+}
+
 /** Min-max normalize a value into 0..1; returns 1 when all values are equal. */
 function minMaxNormalize(value, min, max) {
   if (max === min) return 1;
@@ -135,78 +162,104 @@ export const SearchService = {
     const queryVector = await embedText(query).catch(() => null);
 
     if (!queryVector) {
-      const rankSql = Prisma.sql`ts_rank(n."searchVector", ${tsQuery})`;
+      const runLexical = async (tsQuery) => {
+        const rankSql = Prisma.sql`ts_rank(n."searchVector", ${tsQuery})`;
 
-      // Build dynamic WHERE clauses
-      const conditions = [
-        Prisma.sql`n."userId" = ${userId}`,
-        Prisma.sql`n."searchVector" @@ ${tsQuery}`,
-      ];
+        const conditions = [
+          Prisma.sql`n."userId" = ${userId}`,
+          Prisma.sql`n."searchVector" @@ ${tsQuery}`,
+        ];
 
-      // Status filter: use provided status or default to excluding ARCHIVED
-      if (filters.status) {
-        conditions.push(Prisma.sql`n."status" = ${filters.status}::"NoteStatus"`);
-      } else {
-        conditions.push(Prisma.sql`n."status" != 'ARCHIVED'`);
-      }
-
-      // Cursor-based pagination. The keyset MUST mirror the ORDER BY tuple
-      // (rank DESC, updatedAt DESC, id DESC) or pagination skips/duplicates rows.
-      if (filters.cursor) {
-        const cursor = decodeCursor(filters.cursor);
-        if (cursor.rank === null) {
-          // Legacy id-only cursor (pre-compound pagination).
-          conditions.push(Prisma.sql`n."id" < ${cursor.id}`);
-        } else if (cursor.updatedAt === null) {
-          // Transitional cursor issued before the recency tiebreak shipped:
-          // fall back to the 2-key (rank, id) keyset.
-          conditions.push(
-            Prisma.sql`(${rankSql} < ${cursor.rank} OR (${rankSql} = ${cursor.rank} AND n."id" < ${cursor.id}))`,
-          );
+        if (filters.status) {
+          conditions.push(Prisma.sql`n."status" = ${filters.status}::"NoteStatus"`);
         } else {
-          const cursorUpdatedAt = new Date(cursor.updatedAt);
-          conditions.push(
-            Prisma.sql`(
-              ${rankSql} < ${cursor.rank}
-              OR (${rankSql} = ${cursor.rank} AND n."updatedAt" < ${cursorUpdatedAt})
-              OR (${rankSql} = ${cursor.rank} AND n."updatedAt" = ${cursorUpdatedAt} AND n."id" < ${cursor.id})
-            )`,
-          );
+          conditions.push(Prisma.sql`n."status" != 'ARCHIVED'`);
         }
+
+        if (filters.cursor) {
+          const cursor = decodeCursor(filters.cursor);
+          if (cursor.rank === null) {
+            conditions.push(Prisma.sql`n."id" < ${cursor.id}`);
+          } else if (cursor.updatedAt === null) {
+            conditions.push(
+              Prisma.sql`(${rankSql} < ${cursor.rank} OR (${rankSql} = ${cursor.rank} AND n."id" < ${cursor.id}))`,
+            );
+          } else {
+            const cursorUpdatedAt = new Date(cursor.updatedAt);
+            conditions.push(
+              Prisma.sql`(
+                ${rankSql} < ${cursor.rank}
+                OR (${rankSql} = ${cursor.rank} AND n."updatedAt" < ${cursorUpdatedAt})
+                OR (${rankSql} = ${cursor.rank} AND n."updatedAt" = ${cursorUpdatedAt} AND n."id" < ${cursor.id})
+              )`,
+            );
+          }
+        }
+
+        const whereClause = Prisma.sql`WHERE ${Prisma.join(conditions, ' AND ')}`;
+
+        let joinClause = Prisma.empty;
+        if (filters.tag) {
+          joinClause = Prisma.sql`
+            INNER JOIN "_NoteToTag" nt ON nt."A" = n."id"
+            INNER JOIN "Tag" t ON t."id" = nt."B" AND t."name" = ${filters.tag}`;
+        }
+
+        const results = await prisma.$queryRaw`
+          SELECT n."id", n."slug", n."title", n."excerpt", n."status", n."updatedAt",
+                 ${rankSql} AS rank
+          FROM "Note" n
+          ${joinClause}
+          ${whereClause}
+          ORDER BY rank DESC, n."updatedAt" DESC, n."id" DESC
+          LIMIT ${limit + 1}
+        `;
+
+        const hasMore = results.length > limit;
+        if (hasMore) results.pop();
+        const nextCursor = hasMore ? encodeCursor(results[results.length - 1]) : null;
+
+        return {
+          notes: results.map(({ updatedAt, ...note }) => note),
+          nextCursor,
+        };
+      };
+
+      const strictOut = await runLexical(tsQuery);
+      // Strict hit, or a cursor page (cursors are only ever minted by the strict
+      // tier) → stay strict. Relaxation only fires on an empty first page.
+      if (strictOut.notes.length > 0 || filters.cursor) return strictOut;
+
+      // Tier 2: OR-relax. Single-page rescue (nextCursor null) so a later page
+      // can never mix the OR ts_rank scale with the strict keyset.
+      const orText = buildOrQuery(query);
+      if (orText) {
+        const orOut = await runLexical(Prisma.sql`websearch_to_tsquery('english', ${orText})`);
+        if (orOut.notes.length > 0) return { notes: orOut.notes, nextCursor: null };
       }
 
-      const whereClause = Prisma.sql`WHERE ${Prisma.join(conditions, ' AND ')}`;
-
-      // Tag filter: join with the implicit _NoteToTag and Tag tables
-      let joinClause = Prisma.empty;
+      // Tier 3: pg_trgm fuzzy fallback on title (typo / paraphrase). Single page.
+      const statusCondition = filters.status
+        ? Prisma.sql`n."status" = ${filters.status}::"NoteStatus"`
+        : Prisma.sql`n."status" != 'ARCHIVED'`;
+      let trgJoin = Prisma.empty;
       if (filters.tag) {
-        joinClause = Prisma.sql`
+        trgJoin = Prisma.sql`
           INNER JOIN "_NoteToTag" nt ON nt."A" = n."id"
           INNER JOIN "Tag" t ON t."id" = nt."B" AND t."name" = ${filters.tag}`;
       }
-
-      const results = await prisma.$queryRaw`
-        SELECT n."id", n."slug", n."title", n."excerpt", n."status", n."updatedAt",
-               ${rankSql} AS rank
+      const fuzzy = await prisma.$queryRaw`
+        SELECT n."id", n."slug", n."title", n."excerpt", n."status",
+               similarity(n."title", ${query}) AS rank
         FROM "Note" n
-        ${joinClause}
-        ${whereClause}
+        ${trgJoin}
+        WHERE n."userId" = ${userId}
+          AND ${statusCondition}
+          AND similarity(n."title", ${query}) > ${TRIGRAM_SIMILARITY_THRESHOLD}
         ORDER BY rank DESC, n."updatedAt" DESC, n."id" DESC
-        LIMIT ${limit + 1}
+        LIMIT ${limit}
       `;
-
-      const hasMore = results.length > limit;
-      if (hasMore) results.pop();
-
-      // Encode the cursor from the full row (needs updatedAt) BEFORE stripping it.
-      const nextCursor = hasMore ? encodeCursor(results[results.length - 1]) : null;
-
-      // updatedAt is selected only to drive ordering + the keyset cursor; strip it
-      // so the public SearchResponse shape (id/slug/title/excerpt/status/rank) is unchanged.
-      return {
-        notes: results.map(({ updatedAt, ...note }) => note),
-        nextCursor,
-      };
+      return { notes: fuzzy, nextCursor: null };
     }
 
     // ---- fused RRF path -------------------------------------------------------
@@ -331,17 +384,25 @@ export const SearchService = {
     // Graph-aware expansion: use a lean seed query (ts_rank AS rank), blend with
     // graph co-citation scores, then return the minimal canonical shape.
     if (opts.expand) {
-      const seedRows = await prisma.$queryRaw`
+      const runSeed = (seedTsQuery) => prisma.$queryRaw`
         SELECT n."id", n."slug", n."title", n."excerpt", n."updatedAt",
-               ts_rank(n."searchVector", ${tsQuery}) AS rank
+               ts_rank(n."searchVector", ${seedTsQuery}) AS rank
         FROM "Note" n
         WHERE n."userId" = ${userId}
           AND n."status" != 'ARCHIVED'
           ${namespaceDirId ? Prisma.sql`AND n."directoryId" = ${namespaceDirId}` : Prisma.empty}
-          AND n."searchVector" @@ ${tsQuery}
+          AND n."searchVector" @@ ${seedTsQuery}
         ORDER BY rank DESC, n."updatedAt" DESC
         LIMIT ${limit}
       `;
+
+      let seedRows = await runSeed(tsQuery);
+      if (seedRows.length === 0) {
+        const orText = buildOrQuery(opts.topic);
+        if (orText) {
+          seedRows = await runSeed(Prisma.sql`websearch_to_tsquery('english', ${orText})`);
+        }
+      }
 
       if (seedRows.length === 0) return [];
 
@@ -418,22 +479,32 @@ export const SearchService = {
     }
 
     // Flat lexical path (expand=false / default): preserve the original behavior.
-    let results = await prisma.$queryRaw`
+    const runFlatLexical = (flatTsQuery) => prisma.$queryRaw`
       SELECT n."id", n."slug", n."title", n."excerpt", n."source", n."confidence", n."importance", n."updatedAt",
              n."pinned",
-             ts_rank(n."searchVector", ${tsQuery}) AS score,
-             ts_headline('english', n."content", ${tsQuery},
+             ts_rank(n."searchVector", ${flatTsQuery}) AS score,
+             ts_headline('english', n."content", ${flatTsQuery},
                'MaxFragments=2, MaxWords=30') AS snippet
       FROM "Note" n
       WHERE n."userId" = ${userId}
         AND n."status" != 'ARCHIVED'
         ${namespaceDirId ? Prisma.sql`AND n."directoryId" = ${namespaceDirId}` : Prisma.empty}
-        AND n."searchVector" @@ ${tsQuery}
-      ORDER BY n."pinned" DESC, ts_rank(n."searchVector", ${tsQuery}) * (1 + COALESCE(n."importance", 0) * ${IMPORTANCE_BOOST}) * exp(${-MEMORY_DECAY_RATE}::float8 * EXTRACT(EPOCH FROM (now() - COALESCE(n."lastAccessedAt", n."createdAt"))) / 86400.0) DESC, COALESCE(n."lastAccessedAt", n."createdAt") DESC
+        AND n."searchVector" @@ ${flatTsQuery}
+      ORDER BY n."pinned" DESC, ts_rank(n."searchVector", ${flatTsQuery}) * (1 + COALESCE(n."importance", 0) * ${IMPORTANCE_BOOST}) * exp(${-MEMORY_DECAY_RATE}::float8 * EXTRACT(EPOCH FROM (now() - COALESCE(n."lastAccessedAt", n."createdAt"))) / 86400.0) DESC, COALESCE(n."lastAccessedAt", n."createdAt") DESC
       LIMIT ${limit}
     `;
 
-    // Lexical miss (typo / paraphrase) → pg_trgm fuzzy fallback on title.
+    let results = await runFlatLexical(tsQuery);
+
+    // Tier 2: OR-relax before the fuzzy fallback.
+    if (results.length === 0) {
+      const orText = buildOrQuery(opts.topic);
+      if (orText) {
+        results = await runFlatLexical(Prisma.sql`websearch_to_tsquery('english', ${orText})`);
+      }
+    }
+
+    // Tier 3: lexical miss (typo / paraphrase) → pg_trgm fuzzy fallback on title.
     if (results.length === 0) {
       results = await prisma.$queryRaw`
         SELECT n."id", n."slug", n."title", n."excerpt", n."source", n."confidence", n."importance", n."updatedAt",

@@ -9,4 +9,4 @@ resources:
 
 images:
   - name: ghcr.io/harismawan/mycelium-api
-    newTag: 0.4.4
+    newTag: 0.4.5

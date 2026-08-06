@@ -575,7 +575,7 @@ export const SearchService = {
         AND n."status" != 'ARCHIVED'
         ${namespaceDirId ? Prisma.sql`AND n."directoryId" = ${namespaceDirId}` : Prisma.empty}
         AND n."searchVector" @@ ${flatTsQuery}
-      ORDER BY n."pinned" DESC, ts_rank(n."searchVector", ${flatTsQuery}) * (1 + COALESCE(n."importance", 0) * ${IMPORTANCE_BOOST}) * exp(${-MEMORY_DECAY_RATE}::float8 * EXTRACT(EPOCH FROM (now() - COALESCE(n."lastAccessedAt", n."createdAt"))) / 86400.0) DESC, COALESCE(n."lastAccessedAt", n."createdAt") DESC
+      ORDER BY n."pinned" DESC, ts_rank(n."searchVector", ${flatTsQuery}) * (1 + COALESCE(n."importance", 0) * ${IMPORTANCE_BOOST}::float8) * exp(${-MEMORY_DECAY_RATE}::float8 * EXTRACT(EPOCH FROM (now() - COALESCE(n."lastAccessedAt", n."createdAt"))) / 86400.0) DESC, COALESCE(n."lastAccessedAt", n."createdAt") DESC
       LIMIT ${limit}
     `;
 

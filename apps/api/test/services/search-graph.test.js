@@ -565,10 +565,11 @@ describe('SearchService.getContext metadata', () => {
 
     // calls[0][0] = raw template strings (real quotes); calls[0].slice(1) = bound values.
     const call = mockQueryRaw.mock.calls[0];
-    const rawSql = call[0].join('');
+    const rawSql = call[0].join('$param$');
     expect(rawSql).toContain('n."source"');                 // metadata columns selected
     expect(rawSql).toContain('COALESCE(n."importance", 0)'); // importance-weighted ranking
-    expect(call.slice(1)).toContain(0.15);                  // IMPORTANCE_BOOST bound as a parameter
+    expect(rawSql).toContain('COALESCE(n."importance", 0) * $param$::float8');
+    expect(call.slice(1)).toContain(0.15); // IMPORTANCE_BOOST stays a bound parameter
   });
 
   test('no-topic path: surfaces metadata from findMany', async () => {
